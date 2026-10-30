@@ -1,0 +1,49 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #f8fafc;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* Safe areas */
+@supports (padding: env(safe-area-inset-top)) {
+  body { padding-top: env(safe-area-inset-top); }
+}
+
+button { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+
+/*
+ * Contour noir très fin : rend lisibles les textes blancs posés sur les boutons
+ * colorés du parcours de vente (jaune, orange, catégories…).
+ * Appliqué uniquement via la classe `text-outline`, jamais globalement.
+ */
+.text-outline {
+  text-shadow:
+    0 0 1px rgba(15, 23, 42, 0.9),
+    0 0 2px rgba(15, 23, 42, 0.55);
+}
+
+/* Hide scrollbars on horizontal chip rows */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* Smooth scrolling */
+* { -webkit-overflow-scrolling: touch; }
+
+@media (prefers-color-scheme: dark) {
+  :root { color-scheme: light; }
+}

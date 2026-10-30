@@ -1,0 +1,119 @@
+{
+  "version": "v2",
+  "aide": [
+    "FICHIER UNIQUE DE GESTION DU CATALOGUE STANDARD.",
+    "1. Ajouter un produit : copier-coller un bloc de 'products' ci-dessous et le modifier.",
+    "2. Deposer l'image dans le dossier 'images-sources' en la nommant EXACTEMENT comme la valeur de 'imageKey' (ex : maconnerie-ciment-belier.jpg).",
+    "3. Lancer la commande : npm run catalogue:sync",
+    "4. Coller le contenu du fichier genere 'supabase/catalogue.generated.sql' dans l'editeur SQL de Supabase.",
+    "Ne jamais renommer un 'key' ni un 'imageKey' deja utilise : ce sont des identifiants stables."
+  ],
+  "images": {
+    "sourcesDir": "images-sources",
+    "standard": "/images/products",
+    "thumbnails": "/images/products/thumbnails",
+    "details": "/images/products/details"
+  },
+  "categories": [
+    { "slug": "maconnerie", "name": "Maçonnerie & Ciment", "color": "orange", "sortOrder": 1 },
+    { "slug": "quincaillerie", "name": "Quincaillerie & Clous", "color": "slate", "sortOrder": 2 },
+    { "slug": "plomberie", "name": "Plomberie & Eau", "color": "blue", "sortOrder": 3 },
+    { "slug": "electricite", "name": "Électricité", "color": "yellow", "sortOrder": 4 },
+    { "slug": "peinture", "name": "Peinture & Étanchéité", "color": "violet", "sortOrder": 5 },
+    { "slug": "menuiserie", "name": "Menuiserie & Sécurité de Porte", "color": "red", "sortOrder": 6 },
+    { "slug": "electroportatif", "name": "Outillage Électroportatif & Machines Chantier", "color": "cyan", "sortOrder": 7 },
+    { "slug": "luminaires", "name": "Luminaires & Décoration", "color": "amber", "sortOrder": 8 }
+  ],
+  "products": [
+    {
+      "key": "ciment-cpj-belier",
+      "name": "Ciment CPJ 32.5 / 42.5 (Bélier)",
+      "category": "maconnerie",
+      "stockUnit": "sac",
+      "gros": { "price": 90000, "packaging": "sac" },
+      "detail": { "price": 4500, "packaging": "sac" },
+      "imageKey": "maconnerie-ciment-belier"
+    },
+    {
+      "key": "fer-beton-ha-8",
+      "name": "Fer à béton HA Ø8 (Barre 12m)",
+      "category": "maconnerie",
+      "stockUnit": "barre",
+      "gros": { "price": 34000, "packaging": "barre" },
+      "detail": { "price": 3500, "packaging": "barre" },
+      "imageKey": "maconnerie-fer-beton-ha-8"
+    },
+    {
+      "key": "pointe-n4",
+      "name": "Pointe N°4",
+      "category": "quincaillerie",
+      "stockUnit": "kg",
+      "gros": { "price": 26000, "packaging": "kg" },
+      "detail": { "price": 1100, "packaging": "kg" },
+      "imageKey": "quincaillerie-pointe-n4"
+    },
+    {
+      "key": "pvc-evac-100",
+      "name": "Tuyau PVC Évacuation Ø100 (4m)",
+      "category": "plomberie",
+      "stockUnit": "barre",
+      "gros": { "price": 16000, "packaging": "barre" },
+      "detail": { "price": 3500, "packaging": "barre" },
+      "imageKey": "plomberie-tuyau-pvc-100"
+    },
+    {
+      "key": "fil-electrique-15",
+      "name": "Fil électrique 1.5 mm² (Rouleau 100m)",
+      "category": "electricite",
+      "stockUnit": "rouleau",
+      "gros": { "price": 62500, "packaging": "rouleau" },
+      "detail": { "price": 13500, "packaging": "rouleau" },
+      "imageKey": "electricite-fil-15"
+    },
+    {
+      "key": "peinture-vinylique-latex-20l",
+      "name": "Peinture Vinylique / Latex (Bidon 20L)",
+      "category": "peinture",
+      "stockUnit": "bidon",
+      "gros": { "price": 75000, "packaging": "bidon" },
+      "detail": { "price": 16000, "packaging": "bidon" },
+      "imageKey": "peinture-vinylique-latex-20l"
+    },
+    {
+      "key": "colle-pvc",
+      "name": "Colle PVC (Tangit / Tube 125g)",
+      "category": "plomberie",
+      "stockUnit": "tube",
+      "gros": { "price": 28800, "packaging": "tube" },
+      "detail": { "price": 1500, "packaging": "tube" },
+      "imageKey": "plomberie-colle-pvc-125g"
+    },
+    {
+      "key": "cadenas-40",
+      "name": "Cadenas simple (40 mm)",
+      "category": "menuiserie",
+      "stockUnit": "unité",
+      "gros": { "price": 13500, "packaging": "unité" },
+      "detail": { "price": 1500, "packaging": "unité" },
+      "imageKey": "securite-cadenas-40mm"
+    },
+    {
+      "key": "brouette-renforcee",
+      "name": "Brouette renforcée de chantier",
+      "category": "maconnerie",
+      "stockUnit": "unité",
+      "gros": { "price": 54000, "packaging": "unité" },
+      "detail": { "price": 19000, "packaging": "unité" },
+      "imageKey": "maconnerie-brouette-renforcee"
+    },
+    {
+      "key": "ampoule-led-12w",
+      "name": "Ampoule LED 12W (E27)",
+      "category": "electricite",
+      "stockUnit": "unité",
+      "gros": { "price": 6000, "packaging": "unité" },
+      "detail": { "price": 800, "packaging": "unité" },
+      "imageKey": "electricite-ampoule-led-12w"
+    }
+  ]
+}
