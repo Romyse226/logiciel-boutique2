@@ -27,10 +27,10 @@ interface Props {
 }
 
 const REASON_META: Record<string, { label: string; icon: typeof ArrowDownCircle; color: string }> = {
-  arrival:      { label: 'Arrivage',   icon: ArrowDownCircle, color: 'text-green-700 bg-green-100' },
-  sale:         { label: 'Vente',      icon: ShoppingCart,    color: 'text-blue-700 bg-blue-100' },
-  cancellation: { label: 'Annulation', icon: RotateCcw,       color: 'text-red-700 bg-red-100' },
-  adjustment:   { label: 'Modification', icon: ArrowUpCircle, color: 'text-amber-700 bg-amber-100' },
+  arrival:      { label: 'Arrivage de stock',   icon: ArrowDownCircle, color: 'text-green-700 bg-green-100' },
+  sale:         { label: 'Vente',               icon: ShoppingCart,    color: 'text-blue-700 bg-blue-100' },
+  cancellation: { label: 'Annulation',          icon: RotateCcw,       color: 'text-red-700 bg-red-100' },
+  adjustment:   { label: 'Modification de stock', icon: ArrowUpCircle, color: 'text-amber-700 bg-amber-100' },
 };
 
 function buildWhatsappUrl(sale: Sale): string {
@@ -159,11 +159,10 @@ export function HistoryPage({ supabaseOnline, isGerant, actor, userName, onRefre
             {cancelled ? <X size={20} /> : s.status === 'paid' ? <Check size={20} /> : <AlertTriangle size={20} />}
           </span>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-bold text-slate-800">{productLabel(s)}</p>
+            <p className="truncate text-sm font-extrabold text-slate-800">{cancelled ? 'Vente annulée' : 'Vente effectuée'}</p>
+            <p className="truncate text-sm font-semibold text-slate-700">{productLabel(s)}</p>
             <p className="text-xs text-slate-500">{formatDateTime(s.created_at)}</p>
             {s.customer_name && <p className="text-xs text-slate-600">Client : {s.customer_name}</p>}
-            {cancelled && <p className="text-xs font-bold text-red-600">Annulée</p>}
-            <p className="truncate text-[10px] text-slate-400">{s.reference}</p>
           </div>
           <div className="text-right">
             <p className={classNames('text-sm font-extrabold', cancelled ? 'text-slate-400 line-through' : 'text-slate-900')}>{fmt(s.total)}</p>
@@ -186,10 +185,10 @@ export function HistoryPage({ supabaseOnline, isGerant, actor, userName, onRefre
             <Wallet size={20} />
           </span>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-bold text-slate-800">{s.customer_name ?? productLabel(s)}</p>
+            <p className="truncate text-sm font-extrabold text-slate-800">Crédit accordé</p>
+            <p className="truncate text-sm font-semibold text-slate-700">{s.customer_name ?? productLabel(s)}</p>
             <p className="text-xs text-slate-500">{formatDateTime(s.created_at)}</p>
             <p className="truncate text-sm italic text-slate-800">Effectué par {s.created_by ?? 'Inconnu'}</p>
-            <p className="truncate text-[10px] text-slate-400">{s.reference}</p>
           </div>
           <div className="text-right">
             <p className="text-sm font-extrabold text-red-600">{fmt(s.balance_due)}</p>
@@ -211,9 +210,8 @@ export function HistoryPage({ supabaseOnline, isGerant, actor, userName, onRefre
           <Icon size={20} />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-bold text-slate-800">
-            {meta.label} — {m.product?.name ?? 'Produit'}
-          </p>
+          <p className="truncate text-sm font-extrabold text-slate-800">{meta.label}</p>
+          <p className="truncate text-sm font-semibold text-slate-700">{m.product?.name ?? 'Produit'}</p>
           <p className="text-xs text-slate-500">
             {formatDateTime(m.created_at)}
             {m.note ? ` · ${m.note}` : ''}

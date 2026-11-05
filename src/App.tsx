@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Home, ShoppingCart, History, Crown, Plus, Store as StoreIcon,
-  Check, ArrowRight,
+  Check, ArrowRight, Delete, MessageCircle,
 } from 'lucide-react';
 import { classNames, formatFCFA, vibrate, normalizeCIphone } from '@/lib/format';
 import { userMessage } from '@/lib/errors';
@@ -25,7 +25,7 @@ import { useOfflineSync } from '@/lib/useOfflineSync';
 import { UNIT_GROS, UNIT_DETAIL, isGrosUnit, isDetailUnit } from '@/lib/product';
 import {
   fetchCategories, fetchProducts, fetchStore, registerSale, fetchSaleWithItems,
-  isSupabaseConfigured, pingSupabase, saveProduct, isProductArchived, ensureOwner, employeeState, acceptInvite,
+  isSupabaseConfigured, pingSupabase, saveProduct, isProductArchived, ensureOwner, resetOwnerSecret, employeeState, acceptInvite,
   uploadProductImage, deleteProductImage, type Actor,
 } from '@/lib/supabase';
 import type { Product, ProductCategory, ProductSaleUnit, StoreInfo, Sale, ProductInput } from '@/types';
@@ -102,6 +102,8 @@ export default function App() {
   const [deleting, setDeleting] = useState(false);
   /** Le serveur a répondu que cet appareil n'est pas (ou plus) celui du patron. */
   const [ownerBlocked, setOwnerBlocked] = useState(false);
+  /** Le patron de cet appareil n'a pas encore défini son code secret (base migrée). */
+  const [ownerNeedsSecret, setOwnerNeedsSecret] = useState(false);
 
   const cart = useCart();
   const sellerName = profile.name || (isGerant ? 'Boss' : 'Employé');
@@ -128,9 +130,9 @@ export default function App() {
         return { actor: { id: o.employee_id, token: o.token }, error: null };
       }
       if (o.ok && o.is_owner === false) {
-        // Nom + téléphone ne suffisent pas : on demande le CODE PATRON.
+        // Nom + téléphone ne suffisent pas : on demande le CODE SECRET.
         setOwnerBlocked(true);
-        return { actor: null, error: 'Cet appareil n’est pas reconnu comme le gérant du commerce. Saisis le code du patron.' };
+        return { actor: null, error: 'Cet appareil n’est pas reconnu comme le gérant du commerce. Saisis ton code secret.' };
       }
       return { actor: null, error: o.error ?? 'Impossible de confirmer ton identité.' };
     } catch {
@@ -239,9 +241,12 @@ export default function App() {
           const o = await ensureOwner(profile.deviceToken, profile.name, profile.phone);
           if (o.ok && o.is_owner && o.employee_id && o.token) {
             applyOwner({ employeeId: o.employee_id, name: o.name ?? profile.name, accessToken: o.token });
+            // Base migrée : le patron n'a pas encore de code secret personnel.
+            // On lui demande d'en choisir un (une seule fois).
+            if (o.needs_secret && !cancelled) setOwnerNeedsSecret(true);
           } else if (o.ok && o.is_owner === false) {
             // Le patron existe sur un autre appareil (jeton d'appareil perdu ou
-            // autre navigateur) : on demande le code patron pour le rattacher.
+            // autre navigateur) : on demande le code secret pour le rattacher.
             if (!cancelled) setOwnerBlocked(true);
           }
         }
@@ -386,26 +391,49 @@ export default function App() {
 
   /**
    * Inscription / reconnaissance du patron.
-   * `code` est le CODE PATRON : seul élément accepté par le serveur pour
-   * rattacher un appareil. Renvoie un message d'erreur à afficher, ou null.
+   * `secret` est le CODE SECRET personnel du patron : seul élément accepté par
+   * le serveur pour rattacher un appareil. Renvoie un message d'erreur, ou null.
    */
-  async function handleOnboarding(name: string, phone: string | null, code: string | null): Promise<string | null> {
+  async function handleOnboarding(name: string, phone: string | null, secret: string): Promise<string | null> {
     completeOnboarding(name, phone);
     if (!isSupabaseConfigured) return null;
     try {
-      const o = await ensureOwner(profile.deviceToken, name, phone, code);
+      const o = await ensureOwner(profile.deviceToken, name, phone, secret);
       if (o.ok && o.is_owner && o.employee_id && o.token) {
         applyOwner({ employeeId: o.employee_id, name: o.name ?? name, accessToken: o.token });
         setOwnerBlocked(false);
+        setOwnerNeedsSecret(false);
         return null;
       }
       if (o.ok && o.is_owner === false) {
         setOwnerBlocked(true);
-        return code
-          ? 'Code patron incorrect. Vérifie-le, puis réessaie.'
-          : 'Cet appareil n’est pas reconnu comme le gérant du commerce. Saisis le code du patron.';
+        return secret
+          ? 'Code secret incorrect. Vérifie-le, puis réessaie.'
+          : 'Saisis ton code secret.';
       }
       return o.error ?? 'Impossible de confirmer ton identité.';
+    } catch {
+      return 'Connexion au serveur impossible. Vérifie ton réseau.';
+    }
+  }
+
+  /**
+   * « Code oublié » : le patron saisit le code temporaire communiqué par le
+   * gérant, puis choisit son nouveau code secret. Le code temporaire est
+   * aussitôt invalidé côté serveur.
+   */
+  async function handleResetSecret(tempCode: string, newSecret: string): Promise<string | null> {
+    if (!isSupabaseConfigured) return 'Connexion au serveur impossible. Vérifie ton réseau.';
+    try {
+      const o = await resetOwnerSecret(profile.deviceToken, tempCode, newSecret);
+      if (o.ok && o.is_owner && o.employee_id && o.token) {
+        completeOnboarding(o.name ?? profile.name, profile.phone);
+        applyOwner({ employeeId: o.employee_id, name: o.name ?? profile.name, accessToken: o.token });
+        setOwnerBlocked(false);
+        setOwnerNeedsSecret(false);
+        return null;
+      }
+      return o.error ?? 'Réinitialisation impossible.';
     } catch {
       return 'Connexion au serveur impossible. Vérifie ton réseau.';
     }
@@ -630,12 +658,28 @@ export default function App() {
   }
 
   // Appareil du patron non reconnu par le serveur (jeton d'appareil perdu,
-  // autre navigateur, autre origine) : on le rattache avec le CODE PATRON.
+  // autre navigateur, autre origine) : on le rattache avec le CODE SECRET.
   // Le nom et le numéro, à eux seuls, ne donnent aucun droit.
   if (profile.isOwner && ownerBlocked) {
     return (
       <OnboardingPage
         recovery
+        storeName={store?.name ?? 'Quincaillerie'}
+        initialName={profile.name && profile.name !== 'Boss' ? profile.name : ''}
+        initialPhone={profile.phone}
+        onSubmit={handleOnboarding}
+        onReset={handleResetSecret}
+      />
+    );
+  }
+
+  // Patron reconnu sur cet appareil mais sans code secret défini (base migrée
+  // depuis l'ancien « code patron ») : on lui demande d'en choisir un.
+  if (profile.isOwner && ownerNeedsSecret) {
+    return (
+      <OnboardingPage
+        setSecretOnly
+        storeName={store?.name ?? 'Quincaillerie'}
         initialName={profile.name && profile.name !== 'Boss' ? profile.name : ''}
         initialPhone={profile.phone}
         onSubmit={handleOnboarding}
@@ -644,13 +688,15 @@ export default function App() {
   }
 
   // Toute première page : le boss enregistre sa quincaillerie (nom + téléphone
-  // + le code patron remis à la création du commerce).
+  // + son code secret personnel).
   if (profile.isOwner && !profile.onboarded) {
     return (
       <OnboardingPage
+        storeName={store?.name ?? 'Quincaillerie'}
         initialName={profile.name && profile.name !== 'Boss' ? profile.name : ''}
         initialPhone={profile.phone}
         onSubmit={handleOnboarding}
+        onReset={handleResetSecret}
       />
     );
   }
@@ -887,33 +933,127 @@ function HomeSkeleton() {
   );
 }
 
-/** Première page : le boss enregistre le nom et le téléphone de sa quincaillerie. */
-function OnboardingPage({ onSubmit, recovery = false, initialName = '', initialPhone = null }: {
-  onSubmit: (name: string, phone: string | null, code: string | null) => Promise<string | null>;
+/** Pavé numérique de saisie d'un code secret (style déverrouillage de téléphone). */
+function PinPad({ onDigit, onBackspace, disabled = false }: {
+  onDigit: (d: string) => void;
+  onBackspace: () => void;
+  disabled?: boolean;
+}) {
+  const key = 'h-16 rounded-2xl bg-slate-50 text-2xl font-extrabold text-slate-800 ring-1 ring-slate-200 transition active:scale-95 active:bg-orange-100 disabled:opacity-50';
+  return (
+    <div className="grid grid-cols-3 gap-3">
+      {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((d) => (
+        <button key={d} type="button" disabled={disabled}
+          onClick={() => { vibrate(10); onDigit(d); }} className={key}>
+          {d}
+        </button>
+      ))}
+      <button type="button" disabled={disabled} aria-label="Effacer un chiffre"
+        onClick={() => { vibrate(10); onBackspace(); }}
+        className="flex h-16 items-center justify-center rounded-2xl bg-slate-50 text-slate-500 ring-1 ring-slate-200 transition active:scale-95 active:bg-orange-100 disabled:opacity-50">
+        <Delete size={24} />
+      </button>
+      <button type="button" disabled={disabled}
+        onClick={() => { vibrate(10); onDigit('0'); }} className={key}>
+        0
+      </button>
+      <span aria-hidden />
+    </div>
+  );
+}
+
+/** Points affichant le nombre de chiffres saisis (le code reste masqué). */
+function PinDots({ count }: { count: number }) {
+  const shown = Math.max(6, count);
+  return (
+    <div className="flex items-center justify-center gap-2.5 py-1" role="status" aria-label={`${count} chiffre(s) saisi(s)`}>
+      {Array.from({ length: shown }).map((_, i) => (
+        <span key={i} className={classNames('h-3.5 w-3.5 rounded-full transition', i < count ? 'bg-orange-500' : 'bg-slate-200')} />
+      ))}
+    </div>
+  );
+}
+
+/** Première page : le boss enregistre sa quincaillerie et son code secret personnel. */
+function OnboardingPage({
+  onSubmit, onReset, recovery = false, setSecretOnly = false,
+  initialName = '', initialPhone = null, storeName,
+}: {
+  onSubmit: (name: string, phone: string | null, secret: string) => Promise<string | null>;
+  /** « Code oublié » : échange un code temporaire contre un nouveau code secret. */
+  onReset?: (tempCode: string, newSecret: string) => Promise<string | null>;
   /** Écran de rattachement d'un appareil patron qui n'est plus reconnu. */
   recovery?: boolean;
+  /** Appareil déjà reconnu : on ne demande que le choix du code secret. */
+  setSecretOnly?: boolean;
   initialName?: string;
   initialPhone?: string | null;
+  storeName: string;
 }) {
+  type Step = 'form' | 'forgot' | 'temp' | 'new';
+  const [step, setStep] = useState<Step>('form');
   const [name, setName] = useState(initialName);
   const [phone, setPhone] = useState(initialPhone ?? '');
-  const [code, setCode] = useState('');
+  const [secret, setSecret] = useState('');
+  const [tempCode, setTempCode] = useState('');
+  const [newSecret, setNewSecret] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  async function submit() {
+  const canReset = !setSecretOnly && !!onReset;
+
+  function openWhatsapp() {
+    const text = encodeURIComponent(`Bonjour, j'ai oublié mon code secret pour ma quincaillerie ${storeName}.`);
+    window.open(`https://wa.me/?text=${text}`, '_blank', 'noopener,noreferrer');
+  }
+
+  async function submitSecret() {
     if (busy) return;
-    if (!name.trim()) { setError('Renseigne ton nom.'); return; }
+    if (!setSecretOnly && !name.trim()) { setError('Renseigne ton nom.'); return; }
+    if (secret.length < 4) { setError('Choisis un code secret d’au moins 4 chiffres.'); return; }
     setBusy(true);
     setError(null);
-    const message = await onSubmit(
-      name.trim(),
-      phone.trim() ? normalizeCIphone(phone.trim()) : null,
-      code.trim() ? code.trim() : null,
-    );
+    // Mode « définir le code » : l'appareil est déjà reconnu, on n'écrase pas
+    // le nom / téléphone existants (chaîne vide = le serveur les conserve).
+    const cleanName = setSecretOnly ? '' : name.trim();
+    const cleanPhone = setSecretOnly
+      ? (initialPhone ?? null)
+      : (phone.trim() ? normalizeCIphone(phone.trim()) : null);
+    const message = await onSubmit(cleanName, cleanPhone, secret);
     setBusy(false);
-    if (message) setError(message);
+    if (message) { setError(message); setSecret(''); vibrate([30, 60, 30]); }
   }
+
+  function goToNewSecret() {
+    if (tempCode.length < 4) { setError('Saisis le code temporaire reçu.'); return; }
+    setError(null);
+    setStep('new');
+  }
+
+  async function submitReset() {
+    if (busy || !onReset) return;
+    if (newSecret.length < 4) { setError('Choisis un nouveau code d’au moins 4 chiffres.'); return; }
+    setBusy(true);
+    setError(null);
+    const message = await onReset(tempCode, newSecret);
+    setBusy(false);
+    if (message) { setError(message); setNewSecret(''); setStep('temp'); vibrate([30, 60, 30]); }
+  }
+
+  const title =
+    step === 'forgot' ? 'Code oublié'
+      : step === 'temp' ? 'Code temporaire'
+        : step === 'new' ? 'Nouveau code secret'
+          : recovery ? 'Reconnaître cet appareil'
+            : setSecretOnly ? 'Choisis ton code secret' : 'Bienvenue !';
+
+  const subtitle =
+    step === 'forgot' ? 'Écris-nous sur WhatsApp pour recevoir un code temporaire.'
+      : step === 'temp' ? 'Saisis le code temporaire communiqué par ton gérant.'
+        : step === 'new' ? 'Choisis maintenant ton nouveau code secret.'
+          : recovery ? 'Ce téléphone n’est pas encore rattaché au patron du commerce.'
+            : setSecretOnly ? 'Pour sécuriser l’accès à ta quincaillerie.'
+              : 'Enregistre tes infos et choisis ton code secret.';
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-br from-orange-500 via-orange-500 to-amber-500 px-5 py-8">
@@ -921,57 +1061,139 @@ function OnboardingPage({ onSubmit, recovery = false, initialName = '', initialP
         <span className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-orange-400 to-orange-600 text-white shadow">
           <StoreIcon size={32} />
         </span>
-        <h1 className="mt-4 text-center text-2xl font-extrabold text-slate-800">
-          {recovery ? 'Reconnaître cet appareil' : 'Bienvenue !'}
-        </h1>
-        <p className="mt-1 text-center text-sm text-slate-500">
-          {recovery
-            ? 'Ce téléphone n’est pas encore rattaché au patron du commerce.'
-            : 'Enregistre tes infos pour commencer.'}
-        </p>
-        <label className="mt-6 block">
-          <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Ton nom</span>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Ex : Mohamed"
-            className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm outline-none focus:border-orange-400"
-          />
-        </label>
-        <label className="mt-3 block">
-          <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Numéro de téléphone</span>
-          <input
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            inputMode="tel"
-            placeholder="Ex : 07 00 00 00 00"
-            className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm outline-none focus:border-orange-400"
-          />
-        </label>
-        <label className="mt-3 block">
-          <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Code du patron</span>
-          <input
-            value={code}
-            onChange={(e) => setCode(e.target.value.toUpperCase())}
-            autoCapitalize="characters"
-            autoCorrect="off"
-            spellCheck={false}
-            placeholder="Ex : A3F9C2B71E4D"
-            className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm font-bold tracking-widest outline-none focus:border-orange-400"
-          />
-          <span className="mt-1 block text-[11px] text-slate-400">
-            Remis à la création du commerce. Seul le code patron rattache cet appareil.
-          </span>
-        </label>
-        {error && <p className="mt-3 rounded-xl bg-red-50 p-3 text-sm font-semibold text-red-700 ring-1 ring-red-200">{error}</p>}
-        <button
-          type="button"
-          onClick={submit}
-          disabled={busy}
-          className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 px-4 py-3.5 text-base font-bold text-white shadow transition hover:opacity-95 active:scale-[0.99] disabled:opacity-60"
-        >
-          <Check size={20} /> {busy ? 'Vérification…' : recovery ? 'Rattacher cet appareil' : 'Enregistrer'}
-        </button>
+        <h1 className="mt-4 text-center text-2xl font-extrabold text-slate-800">{title}</h1>
+        <p className="mt-1 text-center text-sm text-slate-500">{subtitle}</p>
+
+        {step === 'form' && (
+          <>
+            {!setSecretOnly && (
+              <>
+                <label className="mt-6 block">
+                  <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Ton nom</span>
+                  <input
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Ex : Mohamed"
+                    className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm outline-none focus:border-orange-400"
+                  />
+                </label>
+                <label className="mt-3 block">
+                  <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Numéro de téléphone</span>
+                  <input
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    inputMode="tel"
+                    placeholder="Ex : 07 00 00 00 00"
+                    className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm outline-none focus:border-orange-400"
+                  />
+                </label>
+              </>
+            )}
+            <p className={classNames('mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500', setSecretOnly ? 'mt-6' : 'mt-4')}>
+              {recovery ? 'Ton code secret' : 'Choisis ton code secret'}
+            </p>
+            <PinDots count={secret.length} />
+            <div className="mt-3">
+              <PinPad
+                disabled={busy}
+                onDigit={(d) => setSecret((v) => (v + d).slice(0, 10))}
+                onBackspace={() => setSecret((v) => v.slice(0, -1))}
+              />
+            </div>
+            {error && <p className="mt-3 rounded-xl bg-red-50 p-3 text-sm font-semibold text-red-700 ring-1 ring-red-200">{error}</p>}
+            <button
+              type="button"
+              onClick={submitSecret}
+              disabled={busy || secret.length < 4}
+              className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 px-4 py-3.5 text-base font-bold text-white shadow transition hover:opacity-95 active:scale-[0.99] disabled:opacity-60"
+            >
+              <Check size={20} /> {busy ? 'Vérification…' : recovery ? 'Rattacher cet appareil' : setSecretOnly ? 'Enregistrer mon code' : 'Créer mon code secret'}
+            </button>
+            {canReset && (
+              <button
+                type="button"
+                onClick={() => { setStep('forgot'); setError(null); }}
+                className="mt-3 w-full rounded-2xl bg-slate-100 px-4 py-3 text-sm font-bold text-slate-600 transition hover:bg-slate-200"
+              >
+                Code oublié ?
+              </button>
+            )}
+          </>
+        )}
+
+        {step === 'forgot' && (
+          <>
+            <button
+              type="button"
+              onClick={openWhatsapp}
+              className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-green-500 px-4 py-3.5 text-base font-bold text-white shadow transition hover:bg-green-600 active:scale-[0.99]"
+            >
+              <MessageCircle size={20} /> Contacter sur WhatsApp
+            </button>
+            <button
+              type="button"
+              onClick={() => { setStep('temp'); setError(null); }}
+              className="mt-3 w-full rounded-2xl bg-slate-100 px-4 py-3 text-sm font-bold text-slate-600 transition hover:bg-slate-200"
+            >
+              J’ai reçu un code temporaire
+            </button>
+            <button type="button" onClick={() => { setStep('form'); setError(null); }} className="mt-3 w-full text-center text-sm font-semibold text-slate-400">
+              Retour
+            </button>
+          </>
+        )}
+
+        {step === 'temp' && (
+          <>
+            <p className="mb-1 mt-6 block text-xs font-bold uppercase tracking-wide text-slate-500">Code temporaire</p>
+            <PinDots count={tempCode.length} />
+            <div className="mt-3">
+              <PinPad
+                disabled={busy}
+                onDigit={(d) => setTempCode((v) => (v + d).slice(0, 10))}
+                onBackspace={() => setTempCode((v) => v.slice(0, -1))}
+              />
+            </div>
+            {error && <p className="mt-3 rounded-xl bg-red-50 p-3 text-sm font-semibold text-red-700 ring-1 ring-red-200">{error}</p>}
+            <button
+              type="button"
+              onClick={goToNewSecret}
+              disabled={tempCode.length < 4}
+              className="mt-5 w-full rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 px-4 py-3.5 text-base font-bold text-white shadow transition hover:opacity-95 active:scale-[0.99] disabled:opacity-60"
+            >
+              Suivant
+            </button>
+            <button type="button" onClick={() => { setStep('forgot'); setError(null); }} className="mt-3 w-full text-center text-sm font-semibold text-slate-400">
+              Retour
+            </button>
+          </>
+        )}
+
+        {step === 'new' && (
+          <>
+            <p className="mb-1 mt-6 block text-xs font-bold uppercase tracking-wide text-slate-500">Nouveau code secret</p>
+            <PinDots count={newSecret.length} />
+            <div className="mt-3">
+              <PinPad
+                disabled={busy}
+                onDigit={(d) => setNewSecret((v) => (v + d).slice(0, 10))}
+                onBackspace={() => setNewSecret((v) => v.slice(0, -1))}
+              />
+            </div>
+            {error && <p className="mt-3 rounded-xl bg-red-50 p-3 text-sm font-semibold text-red-700 ring-1 ring-red-200">{error}</p>}
+            <button
+              type="button"
+              onClick={submitReset}
+              disabled={busy || newSecret.length < 4}
+              className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 px-4 py-3.5 text-base font-bold text-white shadow transition hover:opacity-95 active:scale-[0.99] disabled:opacity-60"
+            >
+              <Check size={20} /> {busy ? 'Enregistrement…' : 'Enregistrer mon nouveau code'}
+            </button>
+            <button type="button" onClick={() => { setStep('temp'); setError(null); }} className="mt-3 w-full text-center text-sm font-semibold text-slate-400">
+              Retour
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
@@ -1040,9 +1262,9 @@ function HomeView({
   if (loading && productCount === 0) return <HomeSkeleton />;
 
   return (
-    <div className="space-y-4 lg:grid lg:grid-cols-2 lg:items-start lg:gap-6 lg:space-y-0">
+    <div className="space-y-4 lg:grid lg:min-h-[calc(100vh-12rem)] lg:content-center lg:grid-cols-2 lg:gap-6 lg:space-y-0">
       {/* Colonne 1 (mobile : simplement empilée) : en-tête boutique + raccourcis */}
-      <div className="space-y-4">
+      <div className="space-y-4 lg:flex lg:flex-col lg:justify-center lg:gap-6 lg:space-y-0">
       <section className="overflow-hidden rounded-3xl bg-gradient-to-br from-orange-500 via-orange-500 to-amber-500 p-6 text-white shadow-lg">
         <p className="text-sm font-semibold text-white/80"></p>
         <h2 className="text-3xl font-extrabold leading-tight">{store?.name ?? 'Quincaillerie'}</h2>
@@ -1066,7 +1288,7 @@ function HomeView({
       </div>
 
       {/* Colonne 2 : état du stock + accès Espace Boss */}
-      <div className="space-y-4">
+      <div className="space-y-4 lg:flex lg:flex-col lg:justify-center lg:gap-6 lg:space-y-0">
       {/* Légende des feux tricolores */}
       <section className="space-y-2 pt-1">
         <h2 className="text-sm font-bold uppercase tracking-wide text-slate-500">État du stock</h2>

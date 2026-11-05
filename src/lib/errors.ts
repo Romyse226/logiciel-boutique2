@@ -38,7 +38,7 @@ export function userMessage(e: unknown): string {
   }
   // Messages liés à l'identité de l'appareil : déjà rédigés pour l'utilisateur,
   // on les affiche tels quels (sinon la cause réelle serait masquée).
-  if (/identité|identifié|gérant du commerce|Code patron|code du patron|patron (non )?configuré|Connexion au serveur impossible|Demande au boss/i.test(raw)) return raw;
+  if (/identité|identifié|gérant du commerce|Code patron|code du patron|code secret|code temporaire|patron (non )?configuré|Connexion au serveur impossible|Demande au boss/i.test(raw)) return raw;
   if (/Failed to fetch|NetworkError|network|Load failed|fetch/i.test(raw)) {
     return 'Connexion au serveur impossible. Vérifiez votre réseau.';
   }

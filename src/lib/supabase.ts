@@ -26,8 +26,10 @@ export interface OwnerResult {
   name?: string;
   token?: string;
   status?: EmployeeStatus;
-  /** true quand le serveur attend le code patron pour rattacher cet appareil. */
+  /** true quand le serveur attend le code secret pour rattacher cet appareil. */
   claim_required?: boolean;
+  /** true quand le patron de cet appareil n'a pas encore défini son code secret. */
+  needs_secret?: boolean;
   error?: string;
 }
 
@@ -161,22 +163,43 @@ function isMissingRpc(error: { code?: string; message?: string } | null): boolea
 
 /**
  * Reconnaît (ou rattache) l'appareil du patron.
- * `claimCode` est le CODE PATRON : c'est la SEULE preuve acceptée pour rattacher
- * un nouvel appareil. Le nom et le téléphone ne donnent aucun droit.
+ * `secret` est le CODE SECRET personnel du patron : c'est la SEULE preuve
+ * acceptée pour rattacher un nouvel appareil. Le nom et le téléphone ne
+ * donnent aucun droit. Le code n'est jamais conservé en clair (hash côté base).
  */
 export async function ensureOwner(
   deviceToken: string,
   name?: string | null,
   phone?: string | null,
-  claimCode?: string | null,
+  secret?: string | null,
 ): Promise<OwnerResult> {
   if (!supabase) return { ok: false, is_owner: false, error: 'Supabase non configuré' };
-  const code = claimCode && claimCode.trim() ? claimCode.trim().toUpperCase() : null;
+  const code = secret && secret.trim() ? secret.trim() : null;
   const { data, error } = await supabase.rpc('ensure_owner', {
     p_device_token: deviceToken,
     p_name: name ?? null,
     p_phone: phone ?? null,
-    p_claim_code: code,
+    p_secret: code,
+  });
+  if (error) return { ok: false, is_owner: false, error: error.message };
+  return data as unknown as OwnerResult;
+}
+
+/**
+ * « Code oublié » : échange un CODE TEMPORAIRE (généré par le gérant depuis
+ * Supabase) contre un NOUVEAU code secret. Le code temporaire devient
+ * inutilisable aussitôt, et l'appareil est rattaché au patron.
+ */
+export async function resetOwnerSecret(
+  deviceToken: string,
+  tempCode: string,
+  newSecret: string,
+): Promise<OwnerResult> {
+  if (!supabase) return { ok: false, is_owner: false, error: 'Supabase non configuré' };
+  const { data, error } = await supabase.rpc('reset_owner_secret', {
+    p_device_token: deviceToken,
+    p_temp_code: tempCode.trim(),
+    p_new_secret: newSecret.trim(),
   });
   if (error) return { ok: false, is_owner: false, error: error.message };
   return data as unknown as OwnerResult;
