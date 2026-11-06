@@ -1,33 +1,55 @@
 import type { CartLine } from '@/types';
-import { classNames, formatFCFA, formatQty, vibrate, playBeep } from '@/lib/format';
+import { classNames, formatFCFA, vibrate, playBeep } from '@/lib/format';
 import { colorOf } from '@/lib/colors';
 import { unitLabel } from '@/lib/product';
 import { ProductImage } from './ProductImage';
-import { X, Minus, Plus, Trash2, ShoppingCart, CreditCard, ChevronLeft } from 'lucide-react';
+import { X, Minus, Plus, Trash2, ShoppingCart, Check, Loader2, ChevronLeft } from 'lucide-react';
 
 interface Props {
   open: boolean;
   lines: CartLine[];
   total: number;
+  processing?: boolean;
+  error?: string | null;
   onClose: () => void;
   onSetQty: (key: string, qty: number) => void;
   onRemove: (key: string) => void;
-  onCheckout: () => void;
+  /** Déclenche directement la validation de la vente en base (Supabase) */
+  onConfirmSale: () => void;
   onContinueShopping: () => void;
 }
 
-export function CartSheet({ open, lines, total, onClose, onSetQty, onRemove, onCheckout, onContinueShopping }: Props) {
+export function CartSheet({ 
+  open, 
+  lines, 
+  total, 
+  processing = false, 
+  error = null, 
+  onClose, 
+  onSetQty, 
+  onRemove, 
+  onConfirmSale, 
+  onContinueShopping 
+}: Props) {
   if (!open) return null;
+
+  function handleDirectConfirm() {
+    if (processing || lines.length === 0) return;
+    vibrate([20, 30, 20]);
+    playBeep(true);
+    onConfirmSale();
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col justify-end sm:items-center sm:justify-center">
-      <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={onClose} aria-hidden />
+      <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={processing ? undefined : onClose} aria-hidden />
       <div className="relative z-10 flex max-h-[92vh] w-full max-w-md flex-col rounded-t-3xl bg-white shadow-2xl sm:max-w-lg sm:rounded-3xl">
         <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-3 py-3">
           <button
             type="button"
             onClick={onClose}
-            className="flex shrink-0 items-center gap-1 rounded-xl px-2 py-1.5 text-sm font-bold text-slate-600 hover:bg-slate-100"
+            disabled={processing}
+            className="flex shrink-0 items-center gap-1 rounded-xl px-2 py-1.5 text-sm font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-40"
           >
             <ChevronLeft size={20} /> Retour
           </button>
@@ -41,7 +63,8 @@ export function CartSheet({ open, lines, total, onClose, onSetQty, onRemove, onC
           <button
             type="button"
             onClick={onClose}
-            className="rounded-full p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+            disabled={processing}
+            className="rounded-full p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-40"
             aria-label="Fermer le panier"
           >
             <X size={20} />
@@ -72,7 +95,6 @@ export function CartSheet({ open, lines, total, onClose, onSetQty, onRemove, onC
                     key={l.key}
                     className="flex items-center gap-3 rounded-2xl bg-slate-50 p-2.5 ring-1 ring-slate-100"
                   >
-                    {/* Photo du produit si elle existe, sinon icône de la catégorie. */}
                     <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white ring-1 ring-slate-200">
                       <ProductImage
                         product={l.product}
@@ -98,7 +120,7 @@ export function CartSheet({ open, lines, total, onClose, onSetQty, onRemove, onC
                           <Minus size={16} />
                         </button>
                         <span className="min-w-[2.5rem] text-center text-sm font-extrabold text-slate-800">
-                          {formatQty(l.quantity)}
+                          {l.quantity}
                         </span>
                         <button
                           type="button"
@@ -128,6 +150,12 @@ export function CartSheet({ open, lines, total, onClose, onSetQty, onRemove, onC
               })}
             </ul>
           )}
+
+          {error && (
+            <p className="mt-4 rounded-xl bg-red-50 p-3 text-sm font-semibold text-red-700 ring-1 ring-red-200">
+              {error}
+            </p>
+          )}
         </div>
 
         {lines.length > 0 && (
@@ -138,11 +166,18 @@ export function CartSheet({ open, lines, total, onClose, onSetQty, onRemove, onC
             </div>
             <button
               type="button"
-              onClick={onCheckout}
-              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 px-4 py-3.5 text-base font-bold text-white shadow-lg shadow-orange-500/20 transition hover:opacity-95 active:scale-[0.99]"
+              disabled={processing}
+              onClick={handleDirectConfirm}
+              className={classNames(
+                'flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3.5 text-base font-bold text-white shadow transition active:scale-[0.99]',
+                !processing ? 'bg-gradient-to-r from-green-500 to-green-600 hover:opacity-95' : 'bg-slate-300 cursor-not-allowed',
+              )}
             >
-              <CreditCard size={20} />
-              Passer au paiement
+              {processing ? (
+                <><Loader2 size={20} className="animate-spin" /> Enregistrement...</>
+              ) : (
+                <><Check size={20} /> Confirmer la vente</>
+              )}
             </button>
           </div>
         )}
