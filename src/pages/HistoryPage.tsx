@@ -15,7 +15,7 @@ import {
   RotateCcw, ShoppingCart, Users, History,
 } from 'lucide-react';
 
-type TabId = 'sales' | 'credits' | 'stock';
+type TabId = 'sales' | 'stock';
 
 interface Props {
   supabaseOnline: boolean;
@@ -57,7 +57,6 @@ export function HistoryPage({ supabaseOnline, isGerant, actor, userName, onRefre
   const [hideAmounts, setHideAmounts] = useState(false);
 
   const [sales, setSales] = useState<Sale[]>([]);
-  const [credits, setCredits] = useState<Sale[]>([]);
   const [movements, setMovements] = useState<StockMovement[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -177,29 +176,6 @@ export function HistoryPage({ supabaseOnline, isGerant, actor, userName, onRefre
     );
   }
 
-  function renderCredit(s: Sale) {
-    return (
-      <li key={s.id}>
-        <button type="button" onClick={() => openDetail(s.id)} className="flex w-full items-center gap-3 rounded-2xl bg-white p-3 text-left ring-1 ring-slate-200 hover:ring-slate-300">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-yellow-100 text-yellow-700">
-            <Wallet size={20} />
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-extrabold text-slate-800">Crédit accordé</p>
-            <p className="truncate text-sm font-semibold text-slate-700">{s.customer_name ?? productLabel(s)}</p>
-            <p className="text-xs text-slate-500">{formatDateTime(s.created_at)}</p>
-            <p className="truncate text-sm italic text-slate-800">Effectué par {s.created_by ?? 'Inconnu'}</p>
-          </div>
-          <div className="text-right">
-            <p className="text-sm font-extrabold text-red-600">{fmt(s.balance_due)}</p>
-            <p className="text-[11px] text-slate-400">reste dû</p>
-          </div>
-          <ChevronRight className="shrink-0 text-slate-300" size={18} />
-        </button>
-      </li>
-    );
-  }
-
   function renderMovement(m: StockMovement) {
     const meta = REASON_META[m.reason] ?? REASON_META.adjustment;
     const Icon = meta.icon;
@@ -244,11 +220,6 @@ export function HistoryPage({ supabaseOnline, isGerant, actor, userName, onRefre
       idle: 'bg-green-50 border-green-200 text-green-700 hover:bg-green-100',
     },
     {
-      id: 'credits', label: 'Crédits clients', icon: Wallet,
-      active: 'bg-amber-400 border-amber-400 text-white shadow-lg shadow-amber-400/30',
-      idle: 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100',
-    },
-    {
       id: 'stock', label: 'Modifications Stock', icon: Wrench,
       active: 'bg-violet-500 border-violet-500 text-white shadow-lg shadow-violet-500/30',
       idle: 'bg-violet-50 border-violet-200 text-violet-700 hover:bg-violet-100',
@@ -291,9 +262,6 @@ export function HistoryPage({ supabaseOnline, isGerant, actor, userName, onRefre
       {tab === 'sales' && (
         <p className="text-sm text-slate-500">{sales.length} vente(s) · Encaissé : {fmt(totalRevenue)}</p>
       )}
-      {tab === 'credits' && (
-        <p className="text-sm text-slate-500">{credits.length} crédit(s) en cours · Reste dû total : <span className="font-bold text-red-600">{fmt(totalDebt)}</span></p>
-      )}
       {tab === 'stock' && (
         <p className="text-sm text-slate-500">{stockMovements.length} mouvement(s) enregistré(s).</p>
       )}
@@ -326,15 +294,6 @@ export function HistoryPage({ supabaseOnline, isGerant, actor, userName, onRefre
           <Empty icon={FileText} text="Aucune vente pour le moment." />
         ) : (
           <ul className="grid grid-cols-1 gap-2 lg:grid-cols-2">{sales.map(renderSale)}</ul>
-        )
-      )}
-
-      {/* Filtre 2 : Crédits clients */}
-      {!loading && tab === 'credits' && (
-        credits.length === 0 ? (
-          <Empty icon={Users} text="Aucun crédit en cours. Toutes les ventes sont soldées." />
-        ) : (
-          <ul className="grid grid-cols-1 gap-2 lg:grid-cols-2">{credits.map(renderCredit)}</ul>
         )
       )}
 
