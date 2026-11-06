@@ -14,7 +14,6 @@ import { EmployeesPage } from '@/pages/EmployeesPage';
 import { StockLegend } from '@/components/StockList';
 import { AddToCartSheet } from '@/components/AddToCartSheet';
 import { CartSheet } from '@/components/CartSheet';
-import { PaymentSheet, type PaymentResult } from '@/components/PaymentSheet';
 import { ReceiptSheet } from '@/components/ReceiptSheet';
 import { ProductEditor, type ProductFormValue } from '@/components/ProductEditor';
 import { OfflineBanner } from '@/components/OfflineBanner';
