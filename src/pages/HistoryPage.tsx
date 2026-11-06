@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Sale, StockMovement } from '@/types';
 import {
-  fetchSales, fetchDebtSales, fetchSaleWithItems, fetchStockMovements,
+  fetchSales, fetchSaleWithItems, fetchStockMovements,
   cancelSale, recordSalePayment, type Actor,
 } from '@/lib/supabase';
 import { classNames, formatFCFA, formatQty, formatDateTime } from '@/lib/format';
@@ -27,9 +27,9 @@ interface Props {
 }
 
 const REASON_META: Record<string, { label: string; icon: typeof ArrowDownCircle; color: string }> = {
-  arrival:      { label: 'Arrivage de stock',   icon: ArrowDownCircle, color: 'text-green-700 bg-green-100' },
-  sale:         { label: 'Vente',               icon: ShoppingCart,    color: 'text-blue-700 bg-blue-100' },
-  cancellation: { label: 'Annulation',          icon: RotateCcw,       color: 'text-red-700 bg-red-100' },
+  arrival:      { label: 'Arrivage de stock',    icon: ArrowDownCircle, color: 'text-green-700 bg-green-100' },
+  sale:         { label: 'Vente',                icon: ShoppingCart,    color: 'text-blue-700 bg-blue-100' },
+  cancellation: { label: 'Annulation',           icon: RotateCcw,       color: 'text-red-700 bg-red-100' },
   adjustment:   { label: 'Modification de stock', icon: ArrowUpCircle, color: 'text-amber-700 bg-amber-100' },
 };
 
@@ -68,10 +68,10 @@ export function HistoryPage({ supabaseOnline, isGerant, actor, userName, onRefre
     if (!supabaseOnline) { setLoading(false); return; }
     setLoading(true); setError(null);
     try {
-      const [s, c, m] = await Promise.all([
-        fetchSales(100), fetchDebtSales(), fetchStockMovements(undefined, 200),
+      const [s, m] = await Promise.all([
+        fetchSales(100), fetchStockMovements(undefined, 200),
       ]);
-      setSales(s); setCredits(c); setMovements(m);
+      setSales(s); setMovements(m);
     } catch (e) {
       setError(userMessage(e));
     } finally {
@@ -88,7 +88,6 @@ export function HistoryPage({ supabaseOnline, isGerant, actor, userName, onRefre
 
   const fmt = (n: number) => (hideAmounts ? '•••• F' : formatFCFA(n));
   const totalRevenue = useMemo(() => sales.filter((s) => s.status !== 'cancelled').reduce((s, x) => s + x.amount_received, 0), [sales]);
-  const totalDebt = useMemo(() => credits.reduce((s, x) => s + x.balance_due, 0), [credits]);
 
   /** « Modifications Stock » : uniquement arrivages et modifications de produits (jamais les ventes). */
   const stockMovements = useMemo(
@@ -96,23 +95,21 @@ export function HistoryPage({ supabaseOnline, isGerant, actor, userName, onRefre
     [movements],
   );
 
-  /** Vue par défaut : les 3 catégories fusionnées, du plus récent au plus ancien. */
+  /** Vue par défaut : les catégories fusionnées, du plus récent au plus ancien. */
   const feed = useMemo(() => {
     const items: Array<
       | { kind: 'sale'; at: string; sale: Sale }
-      | { kind: 'credit'; at: string; sale: Sale }
       | { kind: 'stock'; at: string; movement: StockMovement }
     > = [];
     const seen = new Set<string>();
     for (const s of sales) { items.push({ kind: 'sale', at: s.created_at, sale: s }); seen.add(s.id); }
-    for (const c of credits) { if (!seen.has(c.id)) items.push({ kind: 'credit', at: c.created_at, sale: c }); }
     for (const m of stockMovements) items.push({ kind: 'stock', at: m.created_at, movement: m });
     return items.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
-  }, [sales, credits, stockMovements]);
+  }, [sales, stockMovements]);
 
   async function openDetail(id: string) {
     setDetailOpen(true);
-    setOpenSale(sales.find((s) => s.id === id) ?? credits.find((s) => s.id === id) ?? null);
+    setOpenSale(sales.find((s) => s.id === id) ?? null);
     try {
       const full = await fetchSaleWithItems(id);
       if (full) setOpenSale(full);
@@ -207,7 +204,7 @@ export function HistoryPage({ supabaseOnline, isGerant, actor, userName, onRefre
         <PullToRefreshBar distance={pull.distance} refreshing={pull.refreshing} />
         <h1 className="text-2xl font-extrabold text-slate-800">Historique</h1>
         <div className="rounded-2xl bg-yellow-50 p-4 text-sm font-semibold text-yellow-800 ring-1 ring-yellow-200">
-          La connexion au serveur est nécessaire pour afficher les ventes, les crédits et les modifications de stock.
+          La connexion au serveur est nécessaire pour afficher les ventes et les modifications de stock.
         </div>
       </div>
     );
@@ -237,8 +234,8 @@ export function HistoryPage({ supabaseOnline, isGerant, actor, userName, onRefre
         </button>
       </div>
 
-      {/* Filtres : 3 gros boutons colorés (re-cliquer retire le filtre) */}
-      <div className="grid grid-cols-3 gap-2">
+      {/* Filtres : 2 boutons colorés (re-cliquer retire le filtre) */}
+      <div className="grid grid-cols-2 gap-2">
         {TABS.map((t) => {
           const Icon = t.icon;
           const active = tab === t.id;
@@ -281,8 +278,7 @@ export function HistoryPage({ supabaseOnline, isGerant, actor, userName, onRefre
           <ul className="grid grid-cols-1 gap-2 lg:grid-cols-2">
             {feed.map((item) =>
               item.kind === 'sale' ? renderSale(item.sale)
-                : item.kind === 'credit' ? renderCredit(item.sale)
-                  : renderMovement(item.movement),
+                : renderMovement(item.movement),
             )}
           </ul>
         )
@@ -297,7 +293,7 @@ export function HistoryPage({ supabaseOnline, isGerant, actor, userName, onRefre
         )
       )}
 
-      {/* Filtre 3 : Modifications Stock (arrivages & modifications de produits) */}
+      {/* Filtre 2 : Modifications Stock (arrivages & modifications de produits) */}
       {!loading && tab === 'stock' && (
         stockMovements.length === 0 ? (
           <Empty icon={History} text="Aucune modification de stock enregistrée." />
