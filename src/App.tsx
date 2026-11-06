@@ -89,7 +89,6 @@ export default function App() {
 
   const [selected, setSelected] = useState<Product | null>(null);
   const [cartOpen, setCartOpen] = useState(false);
-  const [payOpen, setPayOpen] = useState(false);
   const [receiptOpen, setReceiptOpen] = useState(false);
   const [lastSale, setLastSale] = useState<Sale | null>(null);
   const [processing, setProcessing] = useState(false);
@@ -815,16 +814,7 @@ export default function App() {
         onCheckout={() => { setCartOpen(false); setPayOpen(true); }}
         onContinueShopping={() => setCartOpen(false)}
       />
-      <PaymentSheet
-        open={payOpen}
-        lines={cart.lines}
-        total={cart.total}
-        processing={processing}
-        error={payError}
-        onClose={() => setPayOpen(false)}
-        onBack={() => { setPayOpen(false); setCartOpen(true); }}
-        onConfirm={handleConfirmPayment}
-      />
+      
       <ReceiptSheet
         open={receiptOpen}
         sale={lastSale}
