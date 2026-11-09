@@ -1,24 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { Sale, SalePayment } from '@/types';
+import type { Sale } from '@/types';
 import { classNames, formatFCFA, formatDateTime } from '@/lib/format';
-import { X, Check, AlertTriangle, Loader2, Wallet, Plus } from 'lucide-react';
+import { X, Check, Loader2, Wallet } from 'lucide-react';
 
 interface Props {
   open: boolean;
   sale: Sale | null;
   onClose: () => void;
-  onPay: (saleId: string, amount: number, note: string) => Promise<{ ok: boolean; error?: string }>;
   onCancel: (saleId: string, reason: string) => Promise<{ ok: boolean; error?: string }>;
   isGerant: boolean;
   onRefresh?: () => void;
 }
 
-export function SaleDetailSheet({ open, sale, onClose, onPay, onCancel, isGerant, onRefresh }: Props) {
-  const [payments, setPayments] = useState<SalePayment[]>([]);
-  const [loadingPay, setLoadingPay] = useState(false);
-  const [payAmount, setPayAmount] = useState('');
-  const [payNote, setPayNote] = useState('');
-  const [paying, setPaying] = useState(false);
+export function SaleDetailSheet({ open, sale, onClose, onCancel, isGerant, onRefresh }: Props) {
   const [cancelling, setCancelling] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [showCancel, setShowCancel] = useState(false);
@@ -26,13 +20,11 @@ export function SaleDetailSheet({ open, sale, onClose, onPay, onCancel, isGerant
 
   useEffect(() => {
     if (open && sale) {
-      setPayments(sale.sale_payments ?? []);
-      setPayAmount(''); setPayNote(''); setError(null); setShowCancel(false); setCancelReason('');
+      setError(null); setShowCancel(false); setCancelReason('');
     }
   }, [open, sale]);
 
   const isCancelled = sale?.status === 'cancelled' || !!sale?.cancelled_at;
-  const balance = sale?.balance_due ?? 0;
 
   const whatsappUrl = useMemo(() => {
     if (!sale) return '';
@@ -46,30 +38,13 @@ export function SaleDetailSheet({ open, sale, onClose, onPay, onCancel, isGerant
     }
     lines.push('---');
     lines.push(`Total: ${formatFCFA(sale.total)}`);
-    lines.push(`Reçu: ${formatFCFA(sale.amount_received)}`);
-    lines.push(`Reste dû: ${formatFCFA(sale.balance_due)}`);
+    lines.push(`Payé: ${formatFCFA(sale.amount_received)}`);
     const text = encodeURIComponent(lines.join('\n'));
     const phone = sale.customer_phone ? sale.customer_phone.replace(/\D/g, '') : '';
     return phone ? `https://wa.me/${phone}?text=${text}` : `https://wa.me/?text=${text}`;
   }, [sale]);
 
   if (!open || !sale) return null;
-
-  async function handlePay() {
-    if (!sale || paying) return;
-    const amount = Number(payAmount);
-    if (!amount || amount <= 0) { setError('Montant invalide'); return; }
-    setPaying(true); setError(null);
-    try {
-      const res = await onPay(sale.id, amount, payNote.trim());
-      if (!res.ok) { setError(res.error ?? 'Échec'); setPaying(false); return; }
-      setPaying(false); setPayAmount(''); setPayNote('');
-      onRefresh?.();
-      onClose();
-    } catch (e) {
-      setError((e as Error).message); setPaying(false);
-    }
-  }
 
   async function handleCancel() {
     if (!sale || cancelling) return;
@@ -92,8 +67,8 @@ export function SaleDetailSheet({ open, sale, onClose, onPay, onCancel, isGerant
         <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
           <div className="flex items-center gap-2">
             <span className={classNames('flex h-8 w-8 items-center justify-center rounded-full',
-              isCancelled ? 'bg-red-100 text-red-700' : sale.status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700')}>
-              {isCancelled ? <X size={16} /> : sale.status === 'paid' ? <Check size={16} /> : <AlertTriangle size={16} />}
+              isCancelled ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700')}>
+              {isCancelled ? <X size={16} /> : <Check size={16} />}
             </span>
             <h2 className="text-base font-extrabold text-slate-800">{sale.reference}</h2>
           </div>
@@ -129,39 +104,8 @@ export function SaleDetailSheet({ open, sale, onClose, onPay, onCancel, isGerant
 
           <div className="space-y-1 border-t border-dashed border-slate-300 pt-2 text-sm">
             <Row label="Total" value={formatFCFA(sale.total)} />
-            <Row label="Reçu" value={formatFCFA(sale.amount_received)} />
-            <Row label="Reste dû" value={formatFCFA(sale.balance_due)} strong={balance > 0} danger={balance > 0} />
+            <Row label="Payé" value={formatFCFA(sale.amount_received)} />
           </div>
-
-          {/* Installments history */}
-          {payments.length > 0 && (
-            <div>
-              <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Versements ({payments.length})</p>
-              <ul className="space-y-1 text-xs">
-                {payments.map((p) => (
-                  <li key={p.id} className="flex justify-between rounded-lg bg-slate-50 px-2 py-1.5">
-                    <span className="text-slate-600">{formatDateTime(p.created_at)}{p.created_by ? ` · ${p.created_by}` : ''}</span>
-                    <span className="font-bold text-green-700">{formatFCFA(p.amount)}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {/* Pay installment */}
-          {!isCancelled && balance > 0 && (
-            <div className="rounded-xl bg-yellow-50 p-3 ring-1 ring-yellow-200">
-              <p className="mb-2 text-xs font-bold uppercase tracking-wide text-yellow-800">Encaisser un versement</p>
-              <div className="flex gap-2">
-                <input inputMode="numeric" value={payAmount} onChange={(e) => setPayAmount(e.target.value.replace(/[^0-9]/g, ''))} placeholder="Montant" className="min-w-0 flex-1 rounded-lg border border-yellow-300 px-3 py-2 text-sm font-bold outline-none focus:border-yellow-400" />
-                <button type="button" onClick={() => setPayAmount(String(Math.round(sale.balance_due)))} className="rounded-lg bg-yellow-200 px-2 text-xs font-bold text-yellow-800">Tout</button>
-              </div>
-              <input value={payNote} onChange={(e) => setPayNote(e.target.value)} placeholder="Note (facultatif)" className="mt-2 w-full rounded-lg border border-yellow-300 px-3 py-2 text-sm outline-none focus:border-yellow-400" />
-              <button type="button" disabled={paying} onClick={handlePay} className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-green-500 to-green-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50">
-                {paying ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Encaisser
-              </button>
-            </div>
-          )}
 
           {/* Cancel (gerant only) */}
           {isGerant && !isCancelled && (
@@ -198,11 +142,11 @@ export function SaleDetailSheet({ open, sale, onClose, onPay, onCancel, isGerant
   );
 }
 
-function Row({ label, value, strong, danger }: { label: string; value: string; strong?: boolean; danger?: boolean }) {
+function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex justify-between">
       <span className="text-slate-600">{label}</span>
-      <span className={classNames(strong ? 'font-extrabold' : '', danger ? 'text-red-600' : 'text-slate-800')}>{value}</span>
+      <span className="text-slate-800">{value}</span>
     </div>
   );
 }

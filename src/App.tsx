@@ -14,7 +14,6 @@ import { EmployeesPage } from '@/pages/EmployeesPage';
 import { StockLegend } from '@/components/StockList';
 import { AddToCartSheet } from '@/components/AddToCartSheet';
 import { CartSheet } from '@/components/CartSheet';
-import { PaymentSheet, type PaymentResult } from '@/components/PaymentSheet';
 import { ReceiptSheet } from '@/components/ReceiptSheet';
 import { ProductEditor, type ProductFormValue } from '@/components/ProductEditor';
 import { OfflineBanner } from '@/components/OfflineBanner';
@@ -69,7 +68,8 @@ function isNetworkError(message?: string | null): boolean {
   return /failed to fetch|networkerror|network|load failed|timeout|fetch/i.test(message);
 }
 
-function insufficientStockLine(lines: CartLine[]): CartLine | null {
+function insufficientStockLine(lines: CartLine[], products: Product[]): CartLine | null {
+  const productsById = new Map(products.map((product) => [product.id, product]));
   const requested = new Map<string, { line: CartLine; quantity: number }>();
   for (const line of lines) {
     const current = requested.get(line.product.id);
@@ -79,8 +79,9 @@ function insufficientStockLine(lines: CartLine[]): CartLine | null {
     });
   }
   for (const { line, quantity } of requested.values()) {
-    const stock = line.product.stock_qty;
-    if (stock != null && quantity > stock) return line;
+    const stock = productsById.get(line.product.id)?.stock_qty;
+    const available = Number(stock);
+    if (!Number.isFinite(available) || available <= 0 || quantity > available) return line;
   }
   return null;
 }
@@ -121,11 +122,10 @@ export default function App() {
 
   const [selected, setSelected] = useState<Product | null>(null);
   const [cartOpen, setCartOpen] = useState(false);
-  const [payOpen, setPayOpen] = useState(false);
   const [receiptOpen, setReceiptOpen] = useState(false);
   const [lastSale, setLastSale] = useState<Sale | null>(null);
   const [processing, setProcessing] = useState(false);
-  const [payError, setPayError] = useState<string | null>(null);
+  const [saleError, setSaleError] = useState<string | null>(null);
   const paymentSubmitting = useRef(false);
 
   const [editorOpen, setEditorOpen] = useState(false);
@@ -324,12 +324,19 @@ export default function App() {
     setCartOpen(true);
   }
 
-  async function handleConfirmPayment(result: PaymentResult) {
+  async function handleConfirmSale() {
     if (paymentSubmitting.current || processing) return;
+    if (cart.lines.length === 0) return;
     paymentSubmitting.current = true;
     setProcessing(true);
-    setPayError(null);
+    setSaleError(null);
     try {
+      const insufficientLine = insufficientStockLine(cart.lines, products);
+      if (insufficientLine) {
+        setSaleError(`${insufficientLine.product.name} est en rupture de stock.`);
+        return;
+      }
+
       const items = cart.lines.map((l) => ({
         product_id: l.product.id,
         unit: l.unit,
@@ -341,23 +348,18 @@ export default function App() {
         storeId: store?.id && store.id !== 'demo' ? store.id : null,
         idempotencyKey,
         items,
-        amountReceived: result.status === 'paid' ? null : result.amountReceived,
-        customerName: result.customerName,
-        customerPhone: result.customerPhone,
+        amountReceived: null,
+        customerName: null,
+        customerPhone: null,
         createdBy: sellerName,
         actorId: actor.id,
         actorToken: actor.token,
       };
 
       if (!offline.online || !isSupabaseConfigured) {
-        const insufficientLine = insufficientStockLine(cart.lines);
-        if (insufficientLine) {
-          setPayError(`Stock insuffisant pour ${insufficientLine.product.name}.`);
-          return;
-        }
         offline.enqueue({ type: 'sale', payload });
         setProducts((current) => decrementProductsStock(current, cart.lines));
-        setPayOpen(false);
+        setCartOpen(false);
         setReceiptOpen(false);
         cart.clear();
         notify('Vente enregistrée hors-ligne. Elle sera envoyée au retour du réseau.');
@@ -368,24 +370,23 @@ export default function App() {
       const res = await registerSale(payload);
       if (!res.ok) {
         if (isNetworkError(res.error)) {
-          const insufficientLine = insufficientStockLine(cart.lines);
-          if (insufficientLine) {
-            setPayError(`Stock insuffisant pour ${insufficientLine.product.name}.`);
-            return;
-          }
           offline.enqueue({ type: 'sale', payload });
           setProducts((current) => decrementProductsStock(current, cart.lines));
-          setPayOpen(false);
+          setCartOpen(false);
           cart.clear();
           notify('Connexion perdue : vente enregistrée hors-ligne. Elle sera envoyée au retour du réseau.');
           openHistory('sales');
           return;
         }
-        setPayError(userMessage(res.error));
+        setSaleError(
+          /stock insuffisant|rupture de stock/i.test(res.error ?? '')
+            ? 'Un produit du panier est en rupture de stock.'
+            : userMessage(res.error),
+        );
         return;
       }
       // La vente est enregistrée côté serveur (`res.ok === true`). La relecture
-      // détaillée (articles, paiements) ne doit JAMAIS transformer une vente
+      // détaillée des articles ne doit JAMAIS transformer une vente
       // réussie en échec : si elle échoue, on affiche le reçu à partir des
       // informations confirmées par le serveur.
       let full: Sale | null = null;
@@ -399,10 +400,9 @@ export default function App() {
         reference: res.reference,
         total: res.total,
         amount_received: res.amount_received,
-        balance_due: res.balance_due,
         status: res.status,
-        customer_name: result.customerName ?? null,
-        customer_phone: result.customerPhone ?? null,
+        customer_name: null,
+        customer_phone: null,
         note: null,
         created_at: new Date().toISOString(),
         created_by: sellerName,
@@ -410,14 +410,14 @@ export default function App() {
         cancelled_by: null,
         cancel_reason: null,
         sale_items: [],
-        sale_payments: [],
       });
+      setProducts((current) => decrementProductsStock(current, cart.lines));
       cart.clear();
-      setPayOpen(false);
+      setCartOpen(false);
       setReceiptOpen(true);
       loadAll();
     } catch (e) {
-      setPayError(userMessage(e));
+      setSaleError(userMessage(e));
     } finally {
       paymentSubmitting.current = false;
       setProcessing(false);
@@ -428,7 +428,6 @@ export default function App() {
     setReceiptOpen(false);
     setLastSale(null);
     setCartOpen(false);
-    setPayOpen(false);
     go('sell');
   }
 
@@ -827,7 +826,7 @@ export default function App() {
         ) : null}
       </main>
 
-      {tab === 'sell' && cartCount > 0 && !cartOpen && !payOpen && !receiptOpen && (
+      {tab === 'sell' && cartCount > 0 && !cartOpen && !receiptOpen && (
         <button
           type="button"
           onClick={() => setCartOpen(true)}
@@ -853,21 +852,13 @@ export default function App() {
         open={cartOpen}
         lines={cart.lines}
         total={cart.total}
+        processing={processing}
+        error={saleError}
         onClose={() => setCartOpen(false)}
         onSetQty={cart.setQuantity}
         onRemove={cart.remove}
-        onCheckout={() => { setCartOpen(false); setPayOpen(true); }}
+        onConfirm={handleConfirmSale}
         onContinueShopping={() => setCartOpen(false)}
-      />
-      <PaymentSheet
-        open={payOpen}
-        lines={cart.lines}
-        total={cart.total}
-        processing={processing}
-        error={payError}
-        onClose={() => setPayOpen(false)}
-        onBack={() => { setPayOpen(false); setCartOpen(true); }}
-        onConfirm={handleConfirmPayment}
       />
       <ReceiptSheet
         open={receiptOpen}
@@ -1326,7 +1317,7 @@ function HomeView({
 
       <div className="grid grid-cols-2 gap-3">
         <Tile icon={ShoppingCart} title="Vendre" subtitle="Encaisser une vente" color="orange" onClick={() => onGo('sell')} />
-        <Tile icon={History} title="Historique" subtitle="Ventes, crédits & stock" color="green" onClick={() => onOpenHistory('sales')} />
+        <Tile icon={History} title="Historique" subtitle="Ventes & stock" color="green" onClick={() => onOpenHistory('sales')} />
       </div>
       </div>
 

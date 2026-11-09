@@ -3,30 +3,33 @@ import { classNames, formatFCFA, formatQty, vibrate, playBeep } from '@/lib/form
 import { colorOf } from '@/lib/colors';
 import { unitLabel } from '@/lib/product';
 import { ProductImage } from './ProductImage';
-import { X, Minus, Plus, Trash2, ShoppingCart, CreditCard, ChevronLeft } from 'lucide-react';
+import { X, Minus, Plus, Trash2, ShoppingCart, Check, ChevronLeft, Loader2 } from 'lucide-react';
 
 interface Props {
   open: boolean;
   lines: CartLine[];
   total: number;
+  processing: boolean;
+  error: string | null;
   onClose: () => void;
   onSetQty: (key: string, qty: number) => void;
   onRemove: (key: string) => void;
-  onCheckout: () => void;
+  onConfirm: () => void;
   onContinueShopping: () => void;
 }
 
-export function CartSheet({ open, lines, total, onClose, onSetQty, onRemove, onCheckout, onContinueShopping }: Props) {
+export function CartSheet({ open, lines, total, processing, error, onClose, onSetQty, onRemove, onConfirm, onContinueShopping }: Props) {
   if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col justify-end sm:items-center sm:justify-center">
-      <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={onClose} aria-hidden />
+      <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={processing ? undefined : onClose} aria-hidden />
       <div className="relative z-10 flex max-h-[92vh] w-full max-w-md flex-col rounded-t-3xl bg-white shadow-2xl sm:max-w-lg sm:rounded-3xl">
         <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-3 py-3">
           <button
             type="button"
             onClick={onClose}
+            disabled={processing}
             className="flex shrink-0 items-center gap-1 rounded-xl px-2 py-1.5 text-sm font-bold text-slate-600 hover:bg-slate-100"
           >
             <ChevronLeft size={20} /> Retour
@@ -41,6 +44,7 @@ export function CartSheet({ open, lines, total, onClose, onSetQty, onRemove, onC
           <button
             type="button"
             onClick={onClose}
+            disabled={processing}
             className="rounded-full p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
             aria-label="Fermer le panier"
           >
@@ -136,13 +140,19 @@ export function CartSheet({ open, lines, total, onClose, onSetQty, onRemove, onC
               <span className="text-sm font-semibold text-slate-600">Total</span>
               <span className="text-xl font-extrabold text-slate-900">{formatFCFA(total)}</span>
             </div>
+            {error && (
+              <p role="alert" className="mb-3 rounded-xl bg-red-50 p-3 text-sm font-semibold text-red-700 ring-1 ring-red-200">
+                {error}
+              </p>
+            )}
             <button
               type="button"
-              onClick={onCheckout}
-              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 px-4 py-3.5 text-base font-bold text-white shadow-lg shadow-orange-500/20 transition hover:opacity-95 active:scale-[0.99]"
+              onClick={onConfirm}
+              disabled={processing || lines.length === 0}
+              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-green-500 to-green-600 px-4 py-3.5 text-base font-bold text-white shadow-lg shadow-green-500/20 transition hover:opacity-95 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
             >
-              <CreditCard size={20} />
-              Passer au paiement
+              {processing ? <Loader2 size={20} className="animate-spin" /> : <Check size={20} />}
+              {processing ? 'Enregistrement…' : 'Confirmer la vente'}
             </button>
           </div>
         )}

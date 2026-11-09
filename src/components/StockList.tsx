@@ -153,7 +153,7 @@ export function StockListSheet({
                         <p className="truncate text-xs text-slate-500">
                           {p.category?.name ? `${p.category.name} · ` : ''}
                           <span className="font-bold text-slate-700">
-                            Stock : {p.stock_qty == null ? 'à configurer' : formatQty(p.stock_qty)}
+                            Stock : {formatQty(p.stock_qty ?? 0)}
                           </span>
                         </p>
                       </div>

@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Sale, StockMovement } from '@/types';
 import {
-  fetchSales, fetchDebtSales, fetchSaleWithItems, fetchStockMovements,
-  cancelSale, recordSalePayment, type Actor,
+  fetchSales, fetchSaleWithItems, fetchStockMovements, cancelSale, type Actor,
 } from '@/lib/supabase';
 import { classNames, formatFCFA, formatQty, formatDateTime } from '@/lib/format';
 import { userMessage } from '@/lib/errors';
@@ -10,12 +9,11 @@ import { usePullToRefresh, PullToRefreshBar } from '@/lib/usePullToRefresh';
 import { SaleDetailSheet } from '@/components/SaleDetailSheet';
 import { SkeletonRow } from '@/components/Skeleton';
 import {
-  Check, AlertTriangle, Loader2, X, Eye, EyeOff, ChevronRight,
-  FileText, Wallet, Wrench, MessageCircle, ArrowDownCircle, ArrowUpCircle,
-  RotateCcw, ShoppingCart, Users, History,
+  Check, X, Eye, EyeOff, ChevronRight, FileText, Wrench,
+  ArrowDownCircle, ArrowUpCircle, RotateCcw, ShoppingCart, History,
 } from 'lucide-react';
 
-type TabId = 'sales' | 'credits' | 'stock';
+type TabId = 'sales' | 'stock';
 
 interface Props {
   supabaseOnline: boolean;
@@ -33,31 +31,12 @@ const REASON_META: Record<string, { label: string; icon: typeof ArrowDownCircle;
   adjustment:   { label: 'Modification de stock', icon: ArrowUpCircle, color: 'text-amber-700 bg-amber-100' },
 };
 
-function buildWhatsappUrl(sale: Sale): string {
-  const lines: string[] = [];
-  lines.push(`Reçu: ${sale.reference}`);
-  lines.push(`Date: ${formatDateTime(sale.created_at)}`);
-  if (sale.customer_name) lines.push(`Client: ${sale.customer_name}`);
-  lines.push('---');
-  for (const it of sale.sale_items ?? []) {
-    lines.push(`- ${it.product_name}: ${it.quantity} ${it.unit} × ${formatFCFA(it.unit_price)} = ${formatFCFA(it.line_total)}`);
-  }
-  lines.push('---');
-  lines.push(`Total: ${formatFCFA(sale.total)}`);
-  lines.push(`Reçu: ${formatFCFA(sale.amount_received)}`);
-  lines.push(`Reste dû: ${formatFCFA(sale.balance_due)}`);
-  const text = encodeURIComponent(lines.join('\n'));
-  const phone = sale.customer_phone ? sale.customer_phone.replace(/\D/g, '') : '';
-  return phone ? `https://wa.me/${phone}?text=${text}` : `https://wa.me/?text=${text}`;
-}
-
 export function HistoryPage({ supabaseOnline, isGerant, actor, userName, onRefresh }: Props) {
   /** null = aucune sélection : toute l'activité est affichée, du plus récent au plus ancien. */
   const [tab, setTab] = useState<TabId | null>(null);
   const [hideAmounts, setHideAmounts] = useState(false);
 
   const [sales, setSales] = useState<Sale[]>([]);
-  const [credits, setCredits] = useState<Sale[]>([]);
   const [movements, setMovements] = useState<StockMovement[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -69,10 +48,10 @@ export function HistoryPage({ supabaseOnline, isGerant, actor, userName, onRefre
     if (!supabaseOnline) { setLoading(false); return; }
     setLoading(true); setError(null);
     try {
-      const [s, c, m] = await Promise.all([
-        fetchSales(100), fetchDebtSales(), fetchStockMovements(undefined, 200),
+      const [s, m] = await Promise.all([
+        fetchSales(100), fetchStockMovements(undefined, 200),
       ]);
-      setSales(s); setCredits(c); setMovements(m);
+      setSales(s); setMovements(m);
     } catch (e) {
       setError(userMessage(e));
     } finally {
@@ -89,7 +68,6 @@ export function HistoryPage({ supabaseOnline, isGerant, actor, userName, onRefre
 
   const fmt = (n: number) => (hideAmounts ? '•••• F' : formatFCFA(n));
   const totalRevenue = useMemo(() => sales.filter((s) => s.status !== 'cancelled').reduce((s, x) => s + x.amount_received, 0), [sales]);
-  const totalDebt = useMemo(() => credits.reduce((s, x) => s + x.balance_due, 0), [credits]);
 
   /** « Modifications Stock » : uniquement arrivages et modifications de produits (jamais les ventes). */
   const stockMovements = useMemo(
@@ -97,34 +75,24 @@ export function HistoryPage({ supabaseOnline, isGerant, actor, userName, onRefre
     [movements],
   );
 
-  /** Vue par défaut : les 3 catégories fusionnées, du plus récent au plus ancien. */
+  /** Vue par défaut : ventes et mouvements de stock, du plus récent au plus ancien. */
   const feed = useMemo(() => {
     const items: Array<
       | { kind: 'sale'; at: string; sale: Sale }
-      | { kind: 'credit'; at: string; sale: Sale }
       | { kind: 'stock'; at: string; movement: StockMovement }
     > = [];
-    const seen = new Set<string>();
-    for (const s of sales) { items.push({ kind: 'sale', at: s.created_at, sale: s }); seen.add(s.id); }
-    for (const c of credits) { if (!seen.has(c.id)) items.push({ kind: 'credit', at: c.created_at, sale: c }); }
+    for (const s of sales) items.push({ kind: 'sale', at: s.created_at, sale: s });
     for (const m of stockMovements) items.push({ kind: 'stock', at: m.created_at, movement: m });
     return items.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
-  }, [sales, credits, stockMovements]);
+  }, [sales, stockMovements]);
 
   async function openDetail(id: string) {
     setDetailOpen(true);
-    setOpenSale(sales.find((s) => s.id === id) ?? credits.find((s) => s.id === id) ?? null);
+    setOpenSale(sales.find((s) => s.id === id) ?? null);
     try {
       const full = await fetchSaleWithItems(id);
       if (full) setOpenSale(full);
     } catch { /* garde l'en-tête */ }
-  }
-
-  async function handlePay(saleId: string, amount: number, note: string) {
-    const res = await recordSalePayment(saleId, amount, 'espèces', note || null, userName);
-    if (!res.ok) return { ok: false, error: userMessage(res.error) };
-    await load();
-    return { ok: true };
   }
 
   async function handleCancel(saleId: string, reason: string) {
@@ -132,13 +100,6 @@ export function HistoryPage({ supabaseOnline, isGerant, actor, userName, onRefre
     if (!res.ok) return { ok: false, error: userMessage(res.error) };
     await load();
     return { ok: true };
-  }
-
-  async function sendWhatsapp(id: string) {
-    try {
-      const full = await fetchSaleWithItems(id);
-      if (full) window.open(buildWhatsappUrl(full), '_blank', 'noopener,noreferrer');
-    } catch { /* ignore */ }
   }
 
   /** Libellé produit d'une vente : nom du produit (ou « +N » si plusieurs articles). */
@@ -155,8 +116,8 @@ export function HistoryPage({ supabaseOnline, isGerant, actor, userName, onRefre
       <li key={s.id} className="overflow-hidden rounded-2xl bg-white ring-1 ring-slate-200">
         <button type="button" onClick={() => openDetail(s.id)} className="flex w-full items-center gap-3 p-3 text-left">
           <span className={classNames('flex h-10 w-10 shrink-0 items-center justify-center rounded-xl',
-            cancelled ? 'bg-red-100 text-red-700' : s.status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700')}>
-            {cancelled ? <X size={20} /> : s.status === 'paid' ? <Check size={20} /> : <AlertTriangle size={20} />}
+            cancelled ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700')}>
+            {cancelled ? <X size={20} /> : <Check size={20} />}
           </span>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-extrabold text-slate-800">{cancelled ? 'Vente annulée' : 'Vente effectuée'}</p>
@@ -166,36 +127,12 @@ export function HistoryPage({ supabaseOnline, isGerant, actor, userName, onRefre
           </div>
           <div className="text-right">
             <p className={classNames('text-sm font-extrabold', cancelled ? 'text-slate-400 line-through' : 'text-slate-900')}>{fmt(s.total)}</p>
-            {!cancelled && s.balance_due > 0 && <p className="text-xs font-bold text-red-600">Reste : {fmt(s.balance_due)}</p>}
           </div>
           <ChevronRight className="shrink-0 text-slate-300" size={18} />
         </button>
         <div className="border-t border-slate-100 px-3 py-2">
           <p className="truncate text-sm italic text-slate-800">Effectué par {s.created_by ?? 'Inconnu'}</p>
         </div>
-      </li>
-    );
-  }
-
-  function renderCredit(s: Sale) {
-    return (
-      <li key={s.id}>
-        <button type="button" onClick={() => openDetail(s.id)} className="flex w-full items-center gap-3 rounded-2xl bg-white p-3 text-left ring-1 ring-slate-200 hover:ring-slate-300">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-yellow-100 text-yellow-700">
-            <Wallet size={20} />
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-extrabold text-slate-800">Crédit accordé</p>
-            <p className="truncate text-sm font-semibold text-slate-700">{s.customer_name ?? productLabel(s)}</p>
-            <p className="text-xs text-slate-500">{formatDateTime(s.created_at)}</p>
-            <p className="truncate text-sm italic text-slate-800">Effectué par {s.created_by ?? 'Inconnu'}</p>
-          </div>
-          <div className="text-right">
-            <p className="text-sm font-extrabold text-red-600">{fmt(s.balance_due)}</p>
-            <p className="text-[11px] text-slate-400">reste dû</p>
-          </div>
-          <ChevronRight className="shrink-0 text-slate-300" size={18} />
-        </button>
       </li>
     );
   }
@@ -231,7 +168,7 @@ export function HistoryPage({ supabaseOnline, isGerant, actor, userName, onRefre
         <PullToRefreshBar distance={pull.distance} refreshing={pull.refreshing} />
         <h1 className="text-2xl font-extrabold text-slate-800">Historique</h1>
         <div className="rounded-2xl bg-yellow-50 p-4 text-sm font-semibold text-yellow-800 ring-1 ring-yellow-200">
-          La connexion au serveur est nécessaire pour afficher les ventes, les crédits et les modifications de stock.
+          La connexion au serveur est nécessaire pour afficher les ventes et les modifications de stock.
         </div>
       </div>
     );
@@ -242,11 +179,6 @@ export function HistoryPage({ supabaseOnline, isGerant, actor, userName, onRefre
       id: 'sales', label: 'Ventes effectuées', icon: FileText,
       active: 'bg-green-500 border-green-500 text-white shadow-lg shadow-green-500/30',
       idle: 'bg-green-50 border-green-200 text-green-700 hover:bg-green-100',
-    },
-    {
-      id: 'credits', label: 'Crédits clients', icon: Wallet,
-      active: 'bg-amber-400 border-amber-400 text-white shadow-lg shadow-amber-400/30',
-      idle: 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100',
     },
     {
       id: 'stock', label: 'Modifications Stock', icon: Wrench,
@@ -266,8 +198,8 @@ export function HistoryPage({ supabaseOnline, isGerant, actor, userName, onRefre
         </button>
       </div>
 
-      {/* Filtres : 3 gros boutons colorés (re-cliquer retire le filtre) */}
-      <div className="grid grid-cols-3 gap-2">
+      {/* Filtres : re-cliquer retire le filtre */}
+      <div className="grid grid-cols-2 gap-2">
         {TABS.map((t) => {
           const Icon = t.icon;
           const active = tab === t.id;
@@ -291,9 +223,6 @@ export function HistoryPage({ supabaseOnline, isGerant, actor, userName, onRefre
       {tab === 'sales' && (
         <p className="text-sm text-slate-500">{sales.length} vente(s) · Encaissé : {fmt(totalRevenue)}</p>
       )}
-      {tab === 'credits' && (
-        <p className="text-sm text-slate-500">{credits.length} crédit(s) en cours · Reste dû total : <span className="font-bold text-red-600">{fmt(totalDebt)}</span></p>
-      )}
       {tab === 'stock' && (
         <p className="text-sm text-slate-500">{stockMovements.length} mouvement(s) enregistré(s).</p>
       )}
@@ -313,8 +242,7 @@ export function HistoryPage({ supabaseOnline, isGerant, actor, userName, onRefre
           <ul className="grid grid-cols-1 gap-2 lg:grid-cols-2">
             {feed.map((item) =>
               item.kind === 'sale' ? renderSale(item.sale)
-                : item.kind === 'credit' ? renderCredit(item.sale)
-                  : renderMovement(item.movement),
+                : renderMovement(item.movement),
             )}
           </ul>
         )
@@ -329,16 +257,7 @@ export function HistoryPage({ supabaseOnline, isGerant, actor, userName, onRefre
         )
       )}
 
-      {/* Filtre 2 : Crédits clients */}
-      {!loading && tab === 'credits' && (
-        credits.length === 0 ? (
-          <Empty icon={Users} text="Aucun crédit en cours. Toutes les ventes sont soldées." />
-        ) : (
-          <ul className="grid grid-cols-1 gap-2 lg:grid-cols-2">{credits.map(renderCredit)}</ul>
-        )
-      )}
-
-      {/* Filtre 3 : Modifications Stock (arrivages & modifications de produits) */}
+      {/* Modifications Stock (arrivages & modifications de produits) */}
       {!loading && tab === 'stock' && (
         stockMovements.length === 0 ? (
           <Empty icon={History} text="Aucune modification de stock enregistrée." />
@@ -351,7 +270,6 @@ export function HistoryPage({ supabaseOnline, isGerant, actor, userName, onRefre
         open={detailOpen}
         sale={openSale}
         onClose={() => setDetailOpen(false)}
-        onPay={handlePay}
         onCancel={handleCancel}
         isGerant={isGerant}
         onRefresh={load}

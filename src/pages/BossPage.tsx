@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Sale } from '@/types';
-import { fetchSales, fetchDebtSales } from '@/lib/supabase';
+import { fetchSales } from '@/lib/supabase';
 import { userMessage } from '@/lib/errors';
 import { classNames, formatFCFA, vibrate } from '@/lib/format';
 import { usePullToRefresh, PullToRefreshBar } from '@/lib/usePullToRefresh';
 import { Skeleton } from '@/components/Skeleton';
 import {
-  Crown, Coins, Banknote, Wallet, ShoppingCart, Users,
+  Crown, Coins, Banknote, ShoppingCart, Users,
   ChevronRight,
 } from 'lucide-react';
 
-export type HistoryTab = 'sales' | 'credits' | 'stock';
+export type HistoryTab = 'sales' | 'stock';
 
 type Period = 'today' | 'yesterday' | 'week' | 'month';
 
@@ -50,7 +50,6 @@ interface Props {
 export function BossPage({ supabaseOnline, onOpenEmployees }: Props) {
   const [period, setPeriod] = useState<Period>('today');
   const [sales, setSales] = useState<Sale[]>([]);
-  const [debtTotal, setDebtTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -58,9 +57,7 @@ export function BossPage({ supabaseOnline, onOpenEmployees }: Props) {
     if (!supabaseOnline) { setLoading(false); return; }
     setLoading(true); setError(null);
     try {
-      const [s, credits] = await Promise.all([fetchSales(500), fetchDebtSales()]);
-      setSales(s);
-      setDebtTotal(credits.reduce((sum, x) => sum + x.balance_due, 0));
+      setSales(await fetchSales(500));
     } catch (e) {
       setError(userMessage(e));
     } finally {
@@ -114,11 +111,10 @@ export function BossPage({ supabaseOnline, onOpenEmployees }: Props) {
 
       {error && <p className="rounded-2xl bg-red-50 p-3 text-sm font-semibold text-red-700 ring-1 ring-red-200">{error}</p>}
 
-      {/* 4 questions clés */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      {/* Indicateurs de vente */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
         <Kpi icon={Coins} color="bg-green-500" label="Ventes du jour" value={formatFCFA(salesTotal)} loading={loading} />
         <Kpi icon={Banknote} color="bg-blue-500" label="Argent encaissé" value={formatFCFA(cashTotal)} loading={loading} />
-        <Kpi icon={Wallet} color="bg-red-500" label="Crédits à récupérer" value={formatFCFA(debtTotal)} loading={loading} />
         <Kpi icon={ShoppingCart} color="bg-orange-500" label="Nombre de ventes" value={String(countTotal)} loading={loading} />
       </div>
 

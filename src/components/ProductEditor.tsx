@@ -92,7 +92,7 @@ export function ProductEditor({ open, product, categories, onClose, onSubmit }: 
           image_url: imageUrl,
           price_gros: gros,
           price_detail: detail,
-          stock_qty: stockQty === '' ? null : Number(stockQty),
+          stock_qty: stockQty === '' ? 0 : Number(stockQty),
           low_stock_threshold: isEdit ? (product?.low_stock_threshold ?? 0) : 0,
         },
         imageFile,

@@ -120,24 +120,13 @@ export interface SaleItem {
   restocked: boolean;
 }
 
-export type SaleStatus = 'paid' | 'partial' | 'cancelled';
-
-export interface SalePayment {
-  id: string;
-  sale_id: string;
-  amount: number;
-  method: string;
-  note: string | null;
-  created_by: string | null;
-  created_at: string;
-}
+export type SaleStatus = 'paid' | 'cancelled';
 
 export interface Sale {
   id: string;
   reference: string;
   total: number;
   amount_received: number;
-  balance_due: number;
   status: SaleStatus;
   customer_name: string | null;
   customer_phone: string | null;
@@ -148,7 +137,6 @@ export interface Sale {
   cancelled_by: string | null;
   cancel_reason: string | null;
   sale_items?: SaleItem[];
-  sale_payments?: SalePayment[];
 }
 
 export interface StockMovement {
@@ -179,7 +167,6 @@ export interface RegisterSaleResult {
   reference: string;
   total: number;
   amount_received: number;
-  balance_due: number;
   status: SaleStatus;
   replayed?: boolean;
   error?: string;
@@ -190,15 +177,6 @@ export interface ArrivalResult {
   product_id: string;
   new_stock_qty: number;
   unit: string;
-  error?: string;
-}
-
-export interface PaymentInstallmentResult {
-  ok: boolean;
-  sale_id: string;
-  amount_received: number;
-  balance_due: number;
-  status: SaleStatus;
   error?: string;
 }
 

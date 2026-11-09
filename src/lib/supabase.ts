@@ -1,9 +1,9 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type {
-  Product, ProductCategory, Sale, SalePayment, StoreInfo, StockMovement,
+  Product, ProductCategory, Sale, StoreInfo, StockMovement,
   RegisterSaleResult, RegisterSaleInput, ArrivalResult, ProductInput,
   Employee, EmployeeStatus,
-  PaymentInstallmentResult, CancelSaleResult,
+  CancelSaleResult,
 } from '@/types';
 
 
@@ -508,39 +508,16 @@ export async function fetchSaleWithItems(id: string): Promise<Sale | null> {
   if (!supabase) return null;
   const { data, error } = await supabase
     .from('sales')
-    .select('*, sale_items(*), sale_payments(*)')
+    .select('*, sale_items(*)')
     .eq('id', id)
     .maybeSingle();
   if (error) throw error;
   return (data as unknown as Sale) ?? null;
 }
 
-export async function fetchDebtSales(): Promise<Sale[]> {
-  if (!supabase) return [];
-  const { data, error } = await supabase
-    .from('sales')
-    .select('*, sale_items(*)')
-    .eq('status', 'partial')
-    .is('cancelled_at', null)
-    .order('created_at', { ascending: false });
-  if (error) throw error;
-  return (data ?? []) as unknown as Sale[];
-}
-
-export async function fetchSalePayments(saleId: string): Promise<SalePayment[]> {
-  if (!supabase) return [];
-  const { data, error } = await supabase
-    .from('sale_payments')
-    .select('*')
-    .eq('sale_id', saleId)
-    .order('created_at', { ascending: true });
-  if (error) throw error;
-  return (data ?? []) as unknown as SalePayment[];
-}
-
 export async function registerSale(input: RegisterSaleInput): Promise<RegisterSaleResult> {
   if (!supabase) {
-    return { ok: false, sale_id: '', reference: '', total: 0, amount_received: 0, balance_due: 0, status: 'paid', error: 'Supabase non configuré' };
+    return { ok: false, sale_id: '', reference: '', total: 0, amount_received: 0, status: 'paid', error: 'Supabase non configuré' };
   }
   const base = {
     p_store_id: input.storeId ?? null,
@@ -564,9 +541,9 @@ export async function registerSale(input: RegisterSaleInput): Promise<RegisterSa
   if (hasActor && isMissingRpc(error)) {
     const retry = await supabase.rpc('register_sale', base);
     if (!retry.error) return retry.data as unknown as RegisterSaleResult;
-    return { ok: false, sale_id: '', reference: '', total: 0, amount_received: 0, balance_due: 0, status: 'paid', error: retry.error.message };
+    return { ok: false, sale_id: '', reference: '', total: 0, amount_received: 0, status: 'paid', error: retry.error.message };
   }
-  return { ok: false, sale_id: '', reference: '', total: 0, amount_received: 0, balance_due: 0, status: 'paid', error: error.message };
+  return { ok: false, sale_id: '', reference: '', total: 0, amount_received: 0, status: 'paid', error: error.message };
 }
 
 export async function cancelSale(saleId: string, reason: string | null, cancelledBy: string | null, actor: Actor): Promise<CancelSaleResult> {
@@ -584,23 +561,6 @@ export async function cancelSale(saleId: string, reason: string | null, cancelle
     return { ok: false, sale_id: '', reference: '', restocked_lines: 0, error: error.message };
   }
   return data as unknown as CancelSaleResult;
-}
-
-export async function recordSalePayment(saleId: string, amount: number, method: string, note: string | null, createdBy: string | null): Promise<PaymentInstallmentResult> {
-  if (!supabase) {
-    return { ok: false, sale_id: '', amount_received: 0, balance_due: 0, status: 'partial', error: 'Supabase non configuré' };
-  }
-  const { data, error } = await supabase.rpc('record_sale_payment', {
-    p_sale_id: saleId,
-    p_amount: amount,
-    p_method: method,
-    p_note: note,
-    p_created_by: createdBy,
-  });
-  if (error) {
-    return { ok: false, sale_id: '', amount_received: 0, balance_due: 0, status: 'partial', error: error.message };
-  }
-  return data as unknown as PaymentInstallmentResult;
 }
 
 // ---------- Arrivals ----------

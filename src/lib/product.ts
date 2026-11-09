@@ -66,14 +66,11 @@ export function sellableUnits(product: Pick<Product, 'sale_units'>): ProductSale
     .sort((a, b) => Number(isDetailUnit(a.unit)) - Number(isDetailUnit(b.unit)));
 }
 
-export type StockState = 'ok' | 'out' | 'unknown';
+export type StockState = 'ok' | 'out';
 
 export function stockState(product: Pick<Product, 'stock_qty'>): StockState {
-  const qty = product.stock_qty;
-  if (qty == null) return 'unknown';
-  const numericQty = Number(qty);
-  if (!Number.isFinite(numericQty)) return 'unknown';
-  if (numericQty <= 0) return 'out';
+  const qty = Number(product.stock_qty);
+  if (!Number.isFinite(qty) || qty <= 0) return 'out';
   return 'ok';
 }
 
@@ -81,11 +78,9 @@ export function stockState(product: Pick<Product, 'stock_qty'>): StockState {
 export const STOCK_DOT: Record<StockState, string> = {
   ok: 'bg-green-500',
   out: 'bg-red-500',
-  unknown: 'bg-slate-400',
 };
 
 export const STOCK_LABEL: Record<StockState, string> = {
   ok: 'Stock bon',
   out: 'Rupture de stock',
-  unknown: 'Stock à configurer',
 };

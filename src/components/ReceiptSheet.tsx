@@ -29,9 +29,8 @@ function buildReceiptText(sale: Sale, store: StoreInfo | null): string {
   }
   lines.push('------------------------------');
   lines.push(`Total: ${formatFCFA(sale.total)}`);
-  lines.push(`Reçu: ${formatFCFA(sale.amount_received)}`);
-  lines.push(`Reste dû: ${formatFCFA(sale.balance_due)}`);
-  lines.push(`Statut: ${sale.status === 'paid' ? 'Payé' : 'Partiel'}`);
+  lines.push(`Payé: ${formatFCFA(sale.amount_received)}`);
+  lines.push(`Statut: ${sale.status === 'paid' ? 'Payé' : 'Annulé'}`);
   lines.push('------------------------------');
   lines.push('Merci de votre confiance !');
   return lines.join('\n');
@@ -129,15 +128,11 @@ export function ReceiptSheet({ open, sale, store, onClose, onNewSale }: Props) {
             </ul>
             <hr className="my-2 border-dashed border-slate-300" />
             <div className="flex justify-between"><span>Total</span><b>{formatFCFA(sale.total)}</b></div>
-            <div className="flex justify-between"><span>Reçu</span><span>{formatFCFA(sale.amount_received)}</span></div>
-            <div className="flex justify-between">
-              <span>Reste dû</span>
-              <span className={sale.balance_due > 0 ? 'text-red-600 font-bold' : ''}>{formatFCFA(sale.balance_due)}</span>
-            </div>
+            <div className="flex justify-between"><span>Payé</span><span>{formatFCFA(sale.amount_received)}</span></div>
             <div className="flex justify-between">
               <span>Statut</span>
-              <span className={sale.status === 'paid' ? 'text-green-600 font-bold' : 'text-yellow-700 font-bold'}>
-                {sale.status === 'paid' ? 'Payé' : 'Partiel'}
+              <span className={sale.status === 'paid' ? 'text-green-600 font-bold' : 'text-red-700 font-bold'}>
+                {sale.status === 'paid' ? 'Payé' : 'Annulé'}
               </span>
             </div>
             <hr className="my-2 border-dashed border-slate-300" />

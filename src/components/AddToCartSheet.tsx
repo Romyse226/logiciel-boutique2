@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Product } from '@/types';
 import { ProductImage } from './ProductImage';
-import { classNames, formatFCFA, vibrate, playBeep } from '@/lib/format';
+import { classNames, formatFCFA, formatQty, vibrate, playBeep } from '@/lib/format';
 import { colorOf } from '@/lib/colors';
 import { pricesOf, sellableUnits, findUnit, isGrosUnit, stockState, UNIT_GROS, UNIT_DETAIL } from '@/lib/product';
 import { Minus, Plus, X, Check, ShoppingBasket, ChevronLeft, Package, ShoppingBag } from 'lucide-react';
@@ -56,7 +56,10 @@ export function AddToCartSheet({ product, onClose, onAdd }: Props) {
   }
 
   const lineTotal = selectedPsu ? selectedPsu.price * qty : 0;
-  const canAdd = !!selectedPsu && qty > 0 && selectedPsu.price > 0 && !outOfStock;
+  const stockQty = Number(product.stock_qty);
+  const requestedStock = selectedPsu ? qty * selectedPsu.factor_to_stock : 0;
+  const insufficientStock = !Number.isFinite(stockQty) || stockQty <= 0 || requestedStock > stockQty;
+  const canAdd = !!selectedPsu && qty > 0 && selectedPsu.price > 0 && !insufficientStock;
 
   function handleAdd() {
     if (!selectedPsu || !canAdd) return;
@@ -118,7 +121,12 @@ export function AddToCartSheet({ product, onClose, onAdd }: Props) {
           )}
           {outOfStock && (
             <p className="rounded-2xl bg-red-50 p-4 text-sm font-semibold text-red-700 ring-1 ring-red-200">
-              Ce produit est en rupture de stock et ne peut pas être vendu.
+              Ce produit est en rupture de stock.
+            </p>
+          )}
+          {!outOfStock && selectedPsu && requestedStock > stockQty && (
+            <p className="rounded-2xl bg-red-50 p-4 text-sm font-semibold text-red-700 ring-1 ring-red-200">
+              Stock insuffisant : il reste {formatQty(stockQty)} en stock.
             </p>
           )}
 
