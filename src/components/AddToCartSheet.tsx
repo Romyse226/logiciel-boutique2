@@ -3,7 +3,7 @@ import type { Product } from '@/types';
 import { ProductImage } from './ProductImage';
 import { classNames, formatFCFA, vibrate, playBeep } from '@/lib/format';
 import { colorOf } from '@/lib/colors';
-import { pricesOf, sellableUnits, findUnit, isGrosUnit, UNIT_GROS, UNIT_DETAIL } from '@/lib/product';
+import { pricesOf, sellableUnits, findUnit, isGrosUnit, stockState, UNIT_GROS, UNIT_DETAIL } from '@/lib/product';
 import { Minus, Plus, X, Check, ShoppingBasket, ChevronLeft, Package, ShoppingBag } from 'lucide-react';
 
 interface Props {
@@ -34,6 +34,7 @@ export function AddToCartSheet({ product, onClose, onAdd }: Props) {
 
   const c = colorOf(product.category?.color);
   const { gros, detail } = pricesOf(product);
+  const outOfStock = stockState(product) === 'out';
   // Recherche tolérante : l'unité stockée peut être « DÃ©tail » (ancien encodage).
   const selectedPsu = findUnit(units, unit);
 
@@ -55,7 +56,7 @@ export function AddToCartSheet({ product, onClose, onAdd }: Props) {
   }
 
   const lineTotal = selectedPsu ? selectedPsu.price * qty : 0;
-  const canAdd = !!selectedPsu && qty > 0 && selectedPsu.price > 0;
+  const canAdd = !!selectedPsu && qty > 0 && selectedPsu.price > 0 && !outOfStock;
 
   function handleAdd() {
     if (!selectedPsu || !canAdd) return;
@@ -113,6 +114,11 @@ export function AddToCartSheet({ product, onClose, onAdd }: Props) {
           {hasNoPrice && (
             <p className="rounded-2xl bg-yellow-50 p-4 text-sm font-semibold text-yellow-800 ring-1 ring-yellow-200">
               Les prix de ce produit ne sont pas encore configurés. Demandez au boss de les renseigner.
+            </p>
+          )}
+          {outOfStock && (
+            <p className="rounded-2xl bg-red-50 p-4 text-sm font-semibold text-red-700 ring-1 ring-red-200">
+              Ce produit est en rupture de stock et ne peut pas être vendu.
             </p>
           )}
 
@@ -230,7 +236,7 @@ export function AddToCartSheet({ product, onClose, onAdd }: Props) {
             )}
           >
             <ShoppingBasket size={20} />
-            Ajouter au panier
+            {outOfStock ? 'Rupture de stock' : 'Ajouter au panier'}
             {canAdd && <Check size={18} className="ml-1 opacity-80" />}
           </button>
         </div>

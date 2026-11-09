@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Home, ShoppingCart, History, Crown, Plus, Store as StoreIcon,
   Check, ArrowRight, Delete, MessageCircle,
@@ -28,7 +28,7 @@ import {
   isSupabaseConfigured, pingSupabase, saveProduct, isProductArchived, ensureOwner, resetOwnerSecret, employeeState, acceptInvite,
   uploadProductImage, deleteProductImage, type Actor,
 } from '@/lib/supabase';
-import type { Product, ProductCategory, ProductSaleUnit, StoreInfo, Sale, ProductInput } from '@/types';
+import type { CartLine, Product, ProductCategory, ProductSaleUnit, StoreInfo, Sale, ProductInput } from '@/types';
 
 type Tab = 'home' | 'sell' | 'history' | 'boss';
 type BossScreen = 'dashboard' | 'employees';
@@ -69,6 +69,37 @@ function isNetworkError(message?: string | null): boolean {
   return /failed to fetch|networkerror|network|load failed|timeout|fetch/i.test(message);
 }
 
+function insufficientStockLine(lines: CartLine[]): CartLine | null {
+  const requested = new Map<string, { line: CartLine; quantity: number }>();
+  for (const line of lines) {
+    const current = requested.get(line.product.id);
+    requested.set(line.product.id, {
+      line: current?.line ?? line,
+      quantity: (current?.quantity ?? 0) + line.quantity * line.factorToStock,
+    });
+  }
+  for (const { line, quantity } of requested.values()) {
+    const stock = line.product.stock_qty;
+    if (stock != null && quantity > stock) return line;
+  }
+  return null;
+}
+
+function decrementProductsStock(products: Product[], lines: CartLine[]): Product[] {
+  const decrements = new Map<string, number>();
+  for (const line of lines) {
+    decrements.set(
+      line.product.id,
+      (decrements.get(line.product.id) ?? 0) + line.quantity * line.factorToStock,
+    );
+  }
+  return products.map((product) => {
+    const decrement = decrements.get(product.id);
+    if (decrement == null || product.stock_qty == null) return product;
+    return { ...product, stock_qty: Math.max(0, +(product.stock_qty - decrement).toFixed(3)) };
+  });
+}
+
 export default function App() {
   const {
     profile, identityReady, isGerant, canEditCatalog, canAddProducts,
@@ -95,6 +126,7 @@ export default function App() {
   const [lastSale, setLastSale] = useState<Sale | null>(null);
   const [processing, setProcessing] = useState(false);
   const [payError, setPayError] = useState<string | null>(null);
+  const paymentSubmitting = useRef(false);
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -293,7 +325,8 @@ export default function App() {
   }
 
   async function handleConfirmPayment(result: PaymentResult) {
-    if (processing) return;
+    if (paymentSubmitting.current || processing) return;
+    paymentSubmitting.current = true;
     setProcessing(true);
     setPayError(null);
     try {
@@ -317,8 +350,13 @@ export default function App() {
       };
 
       if (!offline.online || !isSupabaseConfigured) {
+        const insufficientLine = insufficientStockLine(cart.lines);
+        if (insufficientLine) {
+          setPayError(`Stock insuffisant pour ${insufficientLine.product.name}.`);
+          return;
+        }
         offline.enqueue({ type: 'sale', payload });
-        setProcessing(false);
+        setProducts((current) => decrementProductsStock(current, cart.lines));
         setPayOpen(false);
         setReceiptOpen(false);
         cart.clear();
@@ -330,8 +368,13 @@ export default function App() {
       const res = await registerSale(payload);
       if (!res.ok) {
         if (isNetworkError(res.error)) {
+          const insufficientLine = insufficientStockLine(cart.lines);
+          if (insufficientLine) {
+            setPayError(`Stock insuffisant pour ${insufficientLine.product.name}.`);
+            return;
+          }
           offline.enqueue({ type: 'sale', payload });
-          setProcessing(false);
+          setProducts((current) => decrementProductsStock(current, cart.lines));
           setPayOpen(false);
           cart.clear();
           notify('Connexion perdue : vente enregistrée hors-ligne. Elle sera envoyée au retour du réseau.');
@@ -339,7 +382,6 @@ export default function App() {
           return;
         }
         setPayError(userMessage(res.error));
-        setProcessing(false);
         return;
       }
       // La vente est enregistrée côté serveur (`res.ok === true`). La relecture
@@ -373,10 +415,11 @@ export default function App() {
       cart.clear();
       setPayOpen(false);
       setReceiptOpen(true);
-      setProcessing(false);
       loadAll();
     } catch (e) {
       setPayError(userMessage(e));
+    } finally {
+      paymentSubmitting.current = false;
       setProcessing(false);
     }
   }

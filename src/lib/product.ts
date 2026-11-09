@@ -71,7 +71,9 @@ export type StockState = 'ok' | 'out' | 'unknown';
 export function stockState(product: Pick<Product, 'stock_qty'>): StockState {
   const qty = product.stock_qty;
   if (qty == null) return 'unknown';
-  if (qty <= 0) return 'out';
+  const numericQty = Number(qty);
+  if (!Number.isFinite(numericQty)) return 'unknown';
+  if (numericQty <= 0) return 'out';
   return 'ok';
 }
 
