@@ -594,6 +594,78 @@ export async function fetchStockMovements(productId?: string, limit = 200): Prom
   return (data ?? []) as unknown as StockMovement[];
 }
 
+export async function fetchProductStockDetails(productId: string): Promise<{
+  product: Product | null;
+  movements: StockMovement[];
+}> {
+  if (!supabase) return { product: null, movements: [] };
+
+  const { data: productData, error: productError } = await supabase
+    .from('products')
+    .select('*, category:product_categories(*), sale_units:product_sale_units(*)')
+    .eq('id', productId)
+    .maybeSingle();
+  if (productError) throw productError;
+
+  const movements: StockMovement[] = [];
+  const pageSize = 1000;
+  for (let offset = 0; ; offset += pageSize) {
+    const { data, error } = await supabase
+      .from('stock_movements')
+      .select('*')
+      .eq('product_id', productId)
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(offset, offset + pageSize - 1);
+    if (error) throw error;
+
+    const rows = (data ?? []) as unknown as StockMovement[];
+    movements.push(...rows.filter(
+      (movement) => movement.reason !== 'sale' || movement.sale_id === null,
+    ));
+    if (rows.length < pageSize) break;
+  }
+
+  for (let offset = 0; ; offset += pageSize) {
+    const { data, error } = await supabase
+      .from('sale_items')
+      .select('id, product_id, sale_id, unit, stock_decrement, created_at, sale:sales(created_at, created_by)')
+      .eq('product_id', productId)
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(offset, offset + pageSize - 1);
+    if (error) throw error;
+
+    const rows = (data ?? []) as unknown as Array<{
+      id: string;
+      product_id: string;
+      sale_id: string;
+      unit: string;
+      stock_decrement: number;
+      created_at: string;
+      sale: { created_at: string; created_by: string | null } | null;
+    }>;
+    movements.push(...rows.map((item) => ({
+      id: item.id,
+      product_id: item.product_id,
+      sale_id: item.sale_id,
+      reason: 'sale' as const,
+      delta: -Math.abs(Number(item.stock_decrement)),
+      unit: item.unit,
+      quantity: Math.abs(Number(item.stock_decrement)),
+      created_by: item.sale?.created_by ?? null,
+      note: null,
+      created_at: item.sale?.created_at ?? item.created_at,
+    })));
+    if (rows.length < pageSize) break;
+  }
+
+  return {
+    product: (productData as unknown as Product | null) ?? null,
+    movements,
+  };
+}
+
 // ---------- Storage (product images) ----------
 
 

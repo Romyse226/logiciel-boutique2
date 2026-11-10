@@ -3,6 +3,7 @@ import type { Product } from '@/types';
 import { stockState, pricesOf } from '@/lib/product';
 import { classNames, formatFCFA, formatQty, vibrate } from '@/lib/format';
 import { X, Search, PackageX, PackageCheck } from 'lucide-react';
+import { ProductStockDetailSheet } from './ProductStockDetailSheet';
 
 export type StockKind = 'ok' | 'out';
 
@@ -38,6 +39,7 @@ export function productsOfKind(products: Product[], kind: StockKind): Product[] 
 /** Les gros boutons colorés + le pop-up listant les produits concernés. */
 export function StockLegend({ products }: { products: Product[] }) {
   const [open, setOpen] = useState<StockKind | null>(null);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
 
   return (
     <>
@@ -62,7 +64,19 @@ export function StockLegend({ products }: { products: Product[] }) {
           );
         })}
       </div>
-      <StockListSheet open={open} products={products} onClose={() => setOpen(null)} />
+      <StockListSheet
+        open={open}
+        products={products}
+        onClose={() => setOpen(null)}
+        onSelect={setSelectedProduct}
+      />
+      {selectedProduct && (
+        <ProductStockDetailSheet
+          key={selectedProduct.id}
+          product={selectedProduct}
+          onClose={() => setSelectedProduct(null)}
+        />
+      )}
     </>
   );
 }
@@ -74,7 +88,7 @@ export function StockListSheet({
   open: StockKind | null;
   products: Product[];
   onClose: () => void;
-  onSelect?: (p: Product) => void;
+  onSelect: (p: Product) => void;
 }) {
   // Toujours appelé (avant le retour anticipé) : l'ordre des hooks reste stable.
   const [query, setQuery] = useState('');
@@ -143,9 +157,8 @@ export function StockListSheet({
                   <li key={p.id}>
                     <button
                       type="button"
-                      disabled={!onSelect}
-                      onClick={() => { if (onSelect) { onSelect(p); onClose(); } }}
-                      className="flex w-full items-center gap-3 rounded-2xl bg-white p-3 text-left ring-1 ring-slate-200 transition enabled:hover:ring-slate-300 disabled:cursor-default"
+                      onClick={() => onSelect(p)}
+                      className="flex w-full items-center gap-3 rounded-2xl bg-white p-3 text-left ring-1 ring-slate-200 transition hover:ring-slate-300"
                     >
                       <span className={classNames('h-3 w-3 shrink-0 rounded-full', meta.solid)} />
                       <div className="min-w-0 flex-1">

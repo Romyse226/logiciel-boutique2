@@ -90,6 +90,7 @@ export interface Product {
   image_key?: string | null;
   stock_unit: string;
   stock_qty: number | null;
+  initial_stock_qty?: number | null;
   low_stock_threshold: number;
   is_active: boolean;
   is_archived: boolean;
