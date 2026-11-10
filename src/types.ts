@@ -81,6 +81,7 @@ export interface ProductSaleUnit {
 
 export interface Product {
   id: string;
+  store_id?: string | null;
   category_id: string | null;
   name: string;
   description: string | null;

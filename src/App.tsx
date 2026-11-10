@@ -821,6 +821,8 @@ export default function App() {
             <BossPage
               supabaseOnline={effectiveOnline}
               onOpenEmployees={() => setBossScreen('employees')}
+              products={products}
+              storeId={store?.id ?? null}
             />
           )
         ) : null}

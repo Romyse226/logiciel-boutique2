@@ -141,17 +141,28 @@ export function HistoryPage({ supabaseOnline, isGerant, actor, userName, onRefre
     const meta = REASON_META[m.reason] ?? REASON_META.adjustment;
     const Icon = meta.icon;
     const positive = m.delta >= 0;
+    const movementNote = (m.note ?? '')
+      .normalize('NFD')
+      .replace(/\p{Diacritic}/gu, '')
+      .toLowerCase();
+    const isProductCreation = m.reason === 'adjustment' && movementNote.includes('creation du produit');
+    const title = m.reason === 'adjustment'
+      ? isProductCreation ? 'Création de produit' : 'Modification de stock'
+      : meta.label;
+    const note = isProductCreation || movementNote.includes('modification du stock')
+      ? null
+      : m.note;
     return (
       <li key={m.id} className="flex items-center gap-3 rounded-2xl bg-white p-3 ring-1 ring-slate-200">
         <span className={classNames('flex h-10 w-10 shrink-0 items-center justify-center rounded-xl', meta.color)}>
           <Icon size={20} />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-extrabold text-slate-800">{meta.label}</p>
+          <p className="truncate text-sm font-extrabold text-slate-800">{title}</p>
           <p className="truncate text-sm font-semibold text-slate-700">{m.product?.name ?? 'Produit'}</p>
           <p className="text-xs text-slate-500">
             {formatDateTime(m.created_at)}
-            {m.note ? ` · ${m.note}` : ''}
+            {note ? ` · ${note}` : ''}
           </p>
           <p className="truncate text-sm italic text-slate-800">Effectué par {m.created_by ?? 'Inconnu'}</p>
         </div>

@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { Sale } from '@/types';
+import type { Product, Sale } from '@/types';
 import { fetchSales } from '@/lib/supabase';
 import { userMessage } from '@/lib/errors';
 import { classNames, formatFCFA, vibrate } from '@/lib/format';
+import { isDetailUnit, isGrosUnit } from '@/lib/product';
 import { usePullToRefresh, PullToRefreshBar } from '@/lib/usePullToRefresh';
 import { Skeleton } from '@/components/Skeleton';
 import {
-  Crown, Coins, Banknote, ShoppingCart, Users,
+  Crown, Coins, ShoppingCart, Users, Package,
   ChevronRight,
 } from 'lucide-react';
 
@@ -45,9 +46,11 @@ function periodRange(p: Period): { start: Date; end: Date } {
 interface Props {
   supabaseOnline: boolean;
   onOpenEmployees: () => void;
+  products: Product[];
+  storeId: string | null;
 }
 
-export function BossPage({ supabaseOnline, onOpenEmployees }: Props) {
+export function BossPage({ supabaseOnline, onOpenEmployees, products, storeId }: Props) {
   const [period, setPeriod] = useState<Period>('today');
   const [sales, setSales] = useState<Sale[]>([]);
   const [loading, setLoading] = useState(true);
@@ -80,8 +83,20 @@ export function BossPage({ supabaseOnline, onOpenEmployees }: Props) {
   }, [sales, period]);
 
   const salesTotal = inRange.reduce((sum, s) => sum + s.total, 0);
-  const cashTotal = inRange.reduce((sum, s) => sum + s.amount_received, 0);
   const countTotal = inRange.length;
+  const stockValue = products.reduce((sum, product) => {
+    if (product.store_id != null && product.store_id !== storeId) return sum;
+    const quantity = Number(product.stock_qty);
+    if (!Number.isFinite(quantity) || quantity <= 0) return sum;
+
+    const units = product.sale_units ?? [];
+    const detail = units.find((unit) => isDetailUnit(unit.unit) && unit.price > 0);
+    const gros = units.find((unit) => isGrosUnit(unit.unit) && unit.price > 0);
+    const unit = detail ?? gros;
+    if (!unit || !Number.isFinite(unit.factor_to_stock) || unit.factor_to_stock <= 0) return sum;
+
+    return sum + quantity * unit.price / unit.factor_to_stock;
+  }, 0);
 
   return (
     <div className="space-y-4">
@@ -112,10 +127,23 @@ export function BossPage({ supabaseOnline, onOpenEmployees }: Props) {
       {error && <p className="rounded-2xl bg-red-50 p-3 text-sm font-semibold text-red-700 ring-1 ring-red-200">{error}</p>}
 
       {/* Indicateurs de vente */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+      <div className="grid grid-cols-2 gap-3">
         <Kpi icon={Coins} color="bg-green-500" label="Ventes du jour" value={formatFCFA(salesTotal)} loading={loading} />
-        <Kpi icon={Banknote} color="bg-blue-500" label="Argent encaissé" value={formatFCFA(cashTotal)} loading={loading} />
         <Kpi icon={ShoppingCart} color="bg-orange-500" label="Nombre de ventes" value={String(countTotal)} loading={loading} />
+        <div className="col-span-2 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
+          <span className="inline-flex rounded-xl bg-violet-500 p-2 text-white shadow-sm">
+            <Package size={20} />
+          </span>
+          <p className="mt-2 text-xs font-bold uppercase tracking-wide text-slate-500">Valeur totale du stock</p>
+          {loading ? (
+            <Skeleton className="mt-2 h-6 w-32" />
+          ) : (
+            <p className="mt-0.5 text-xl font-extrabold text-slate-800">{formatFCFA(stockValue)}</p>
+          )}
+          <p className="mt-1 text-xs text-slate-500">
+            Valeur totale estimée aux prix des produits disponibles dans le stock
+          </p>
+        </div>
       </div>
 
       {!supabaseOnline && (
