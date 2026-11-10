@@ -53,7 +53,48 @@ export function ProductStockDetailSheet({ product: initialProduct, onClose }: Pr
     .filter((movement) => movement.delta !== 0 && !isOpeningStockMovement(movement))
     .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
   const currentStock = Number(product.stock_qty);
-  const initialStock = product.initial_stock_qty;
+  const initialStock = Number(product.initial_stock_qty);
+  const initialStockKnown = product.initial_stock_qty != null && Number.isFinite(initialStock);
+  const detailUnit = product.sale_units?.find((unit) => unit.unit === UNIT_DETAIL);
+  const grosUnit = product.sale_units?.find((unit) => unit.unit === UNIT_GROS);
+  const valuationUnit = detailUnit && detailUnit.price > 0
+    ? detailUnit
+    : grosUnit && grosUnit.price > 0
+      ? grosUnit
+      : null;
+  const stockUnitPrice = valuationUnit && valuationUnit.factor_to_stock > 0
+    ? valuationUnit.price / valuationUnit.factor_to_stock
+    : null;
+  const stockValue = (quantity: number) => (
+    stockUnitPrice != null && Number.isFinite(quantity) ? formatFCFA(quantity * stockUnitPrice) : '—'
+  );
+  const openingMovement = movements.find(isOpeningStockMovement);
+  const productCreatedAt = 'created_at' in product && typeof product.created_at === 'string'
+    ? product.created_at
+    : null;
+  let stockAfterMovement = initialStock;
+  const movementEvents = history.map((movement) => {
+    stockAfterMovement += Number(movement.delta);
+    return {
+      id: movement.id,
+      delta: Number(movement.delta),
+      stockAfter: stockAfterMovement,
+      created_at: movement.created_at,
+      created_by: movement.created_by,
+    };
+  });
+  const timeline = initialStockKnown
+    ? [
+        {
+          id: 'initial-stock',
+          delta: initialStock,
+          stockAfter: initialStock,
+          created_at: openingMovement?.created_at ?? productCreatedAt ?? history[0]?.created_at ?? new Date().toISOString(),
+          created_by: openingMovement?.created_by ?? null,
+        },
+        ...movementEvents,
+      ]
+    : [];
 
   return (
     <div
@@ -120,13 +161,19 @@ export function ProductStockDetailSheet({ product: initialProduct, onClose }: Pr
               <p className="mt-1 text-xl font-extrabold text-blue-900">
                 {Number.isFinite(currentStock) ? formatQty(currentStock) : '—'}
               </p>
+              <p className="mt-0.5 text-sm font-bold text-blue-800">
+                {Number.isFinite(currentStock) ? stockValue(currentStock) : '—'}
+              </p>
             </div>
             <div className="rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-200">
               <p className="text-xs font-semibold text-slate-600">Stock de base</p>
               <p className="mt-1 text-xl font-extrabold text-slate-900">
-                {initialStock != null && Number.isFinite(Number(initialStock))
-                  ? formatQty(Number(initialStock))
+                {initialStockKnown
+                  ? formatQty(initialStock)
                   : '—'}
+              </p>
+              <p className="mt-0.5 text-sm font-bold text-slate-700">
+                {initialStockKnown ? stockValue(initialStock) : '—'}
               </p>
             </div>
           </div>
@@ -141,14 +188,10 @@ export function ProductStockDetailSheet({ product: initialProduct, onClose }: Pr
             <div className="flex items-center justify-center gap-2 py-8 text-sm font-semibold text-slate-500">
               <Loader2 size={18} className="animate-spin" /> Chargement de l’historique…
             </div>
-          ) : history.length === 0 ? (
-            <p className="rounded-2xl bg-slate-50 p-4 text-center text-sm text-slate-500">
-              Aucun mouvement enregistré.
-            </p>
           ) : (
             <ol className="space-y-2">
-              {history.map((movement) => {
-                const incoming = movement.delta > 0;
+              {timeline.map((movement) => {
+                const incoming = movement.delta >= 0;
                 return (
                   <li key={movement.id} className="flex items-center gap-3 rounded-2xl bg-white p-3 ring-1 ring-slate-200">
                     <span className={`min-w-[4.25rem] rounded-xl px-2 py-1.5 text-center text-sm font-extrabold ${
@@ -160,9 +203,12 @@ export function ProductStockDetailSheet({ product: initialProduct, onClose }: Pr
                       <span className="block text-sm font-semibold text-slate-700">
                         {formatDateTime(movement.created_at)}
                       </span>
-                      <span className="block truncate text-xs text-slate-500">
-                        {movement.created_by?.trim() || 'Nom non renseigné'}
+                      <span className="block truncate text-xs italic text-slate-500">
+                        Effectuée par : {movement.created_by?.trim() || 'Nom non renseigné'}
                       </span>
+                    </span>
+                    <span className="shrink-0 text-right text-sm font-extrabold text-slate-800">
+                      {stockValue(movement.stockAfter)}
                     </span>
                   </li>
                 );
