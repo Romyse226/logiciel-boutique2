@@ -1,7 +1,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type {
   Product, ProductCategory, Sale, StoreInfo, StockMovement,
-  RegisterSaleResult, RegisterSaleInput, ArrivalResult, ProductInput,
+  RegisterSaleResult, RegisterSaleInput, ArrivalResult, ProductInput, SoldStockTotals,
   Employee, EmployeeStatus,
   CancelSaleResult,
 } from '@/types';
@@ -513,6 +513,47 @@ export async function fetchSaleWithItems(id: string): Promise<Sale | null> {
     .maybeSingle();
   if (error) throw error;
   return (data as unknown as Sale) ?? null;
+}
+
+export async function fetchSoldStockTotals(storeId: string | null, productId?: string): Promise<SoldStockTotals> {
+  const totals: SoldStockTotals = { quantity: 0, value: 0 };
+  if (!supabase || !storeId || storeId === 'demo') return totals;
+
+  const pageSize = 1000;
+  for (let offset = 0; ; offset += pageSize) {
+    let query = supabase
+      .from('sale_items')
+      .select('product_id, stock_decrement, line_total, sale:sales!inner(store_id, status, cancelled_at)')
+      .eq('sale.store_id', storeId)
+      .neq('sale.status', 'cancelled')
+      .is('sale.cancelled_at', null)
+      .order('id', { ascending: true })
+      .range(offset, offset + pageSize - 1);
+    if (productId) query = query.eq('product_id', productId);
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const items = (data ?? []) as unknown as Array<{
+      product_id: string;
+      stock_decrement: number;
+      line_total: number;
+      sale: { store_id: string | null; status: string; cancelled_at: string | null } | null;
+    }>;
+    for (const item of items) {
+      if (
+        item.sale?.store_id !== storeId
+        || item.sale.status === 'cancelled'
+        || item.sale.cancelled_at !== null
+      ) continue;
+      totals.quantity += Number(item.stock_decrement);
+      totals.value += Number(item.line_total);
+    }
+
+    if (items.length < pageSize) break;
+  }
+
+  return totals;
 }
 
 export async function registerSale(input: RegisterSaleInput): Promise<RegisterSaleResult> {

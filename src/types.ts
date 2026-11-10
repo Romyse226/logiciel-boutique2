@@ -122,6 +122,11 @@ export interface SaleItem {
   restocked: boolean;
 }
 
+export interface SoldStockTotals {
+  quantity: number;
+  value: number;
+}
+
 export type SaleStatus = 'paid' | 'cancelled';
 
 export interface Sale {

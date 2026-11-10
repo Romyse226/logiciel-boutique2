@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react';
-import type { Product, StockMovement } from '@/types';
-import { fetchProductStockDetails } from '@/lib/supabase';
+import type { Product, SoldStockTotals, StockMovement } from '@/types';
+import { fetchProductStockDetails, fetchSoldStockTotals } from '@/lib/supabase';
 import { formatDateTime, formatFCFA, formatQty, vibrate } from '@/lib/format';
-import { pricesOf, UNIT_DETAIL, UNIT_GROS } from '@/lib/product';
+import { isDetailUnit, isGrosUnit, pricesOf, UNIT_DETAIL, UNIT_GROS } from '@/lib/product';
 import { userMessage } from '@/lib/errors';
 import { ChevronLeft, Loader2, X } from 'lucide-react';
 import { ProductImage } from './ProductImage';
 
 interface Props {
   product: Product;
+  storeId: string | null;
   onClose: () => void;
 }
 
@@ -20,9 +21,10 @@ function isOpeningStockMovement(movement: StockMovement): boolean {
   return movement.reason === 'adjustment' && note.includes('creation du produit');
 }
 
-export function ProductStockDetailSheet({ product: initialProduct, onClose }: Props) {
+export function ProductStockDetailSheet({ product: initialProduct, storeId, onClose }: Props) {
   const [product, setProduct] = useState(initialProduct);
   const [movements, setMovements] = useState<StockMovement[]>([]);
+  const [sold, setSold] = useState<SoldStockTotals>({ quantity: 0, value: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,11 +34,15 @@ export function ProductStockDetailSheet({ product: initialProduct, onClose }: Pr
     setLoading(true);
     setError(null);
 
-    fetchProductStockDetails(initialProduct.id)
-      .then((details) => {
+    Promise.all([
+      fetchProductStockDetails(initialProduct.id),
+      fetchSoldStockTotals(storeId, initialProduct.id),
+    ])
+      .then(([details, totals]) => {
         if (!active) return;
         if (details.product) setProduct(details.product);
         setMovements(details.movements);
+        setSold(totals);
       })
       .catch((cause: unknown) => {
         if (active) setError(userMessage(cause));
@@ -46,7 +52,7 @@ export function ProductStockDetailSheet({ product: initialProduct, onClose }: Pr
       });
 
     return () => { active = false; };
-  }, [initialProduct]);
+  }, [initialProduct, storeId]);
 
   const { gros, detail } = pricesOf(product);
   const history = movements
@@ -55,8 +61,8 @@ export function ProductStockDetailSheet({ product: initialProduct, onClose }: Pr
   const currentStock = Number(product.stock_qty);
   const initialStock = Number(product.initial_stock_qty);
   const initialStockKnown = product.initial_stock_qty != null && Number.isFinite(initialStock);
-  const detailUnit = product.sale_units?.find((unit) => unit.unit === UNIT_DETAIL);
-  const grosUnit = product.sale_units?.find((unit) => unit.unit === UNIT_GROS);
+  const detailUnit = product.sale_units?.find((unit) => isDetailUnit(unit.unit));
+  const grosUnit = product.sale_units?.find((unit) => isGrosUnit(unit.unit));
   const valuationUnit = detailUnit && detailUnit.price > 0
     ? detailUnit
     : grosUnit && grosUnit.price > 0
@@ -156,24 +162,22 @@ export function ProductStockDetailSheet({ product: initialProduct, onClose }: Pr
           </div>
 
           <div className="mt-4 grid grid-cols-2 gap-3">
+            <div className="rounded-2xl bg-green-50 p-3 ring-1 ring-green-100">
+              <p className="text-xs font-semibold text-green-700">Stock vendu</p>
+              <p className="mt-1 text-xl font-extrabold text-green-900">
+                {formatQty(sold.quantity)}
+              </p>
+              <p className="mt-0.5 text-sm font-bold text-green-800">
+                {formatFCFA(sold.value)}
+              </p>
+            </div>
             <div className="rounded-2xl bg-blue-50 p-3 ring-1 ring-blue-100">
-              <p className="text-xs font-semibold text-blue-700">Stock actuel</p>
+              <p className="text-xs font-semibold text-blue-700">Stock restant (actuel)</p>
               <p className="mt-1 text-xl font-extrabold text-blue-900">
                 {Number.isFinite(currentStock) ? formatQty(currentStock) : '—'}
               </p>
               <p className="mt-0.5 text-sm font-bold text-blue-800">
                 {Number.isFinite(currentStock) ? stockValue(currentStock) : '—'}
-              </p>
-            </div>
-            <div className="rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-200">
-              <p className="text-xs font-semibold text-slate-600">Stock de base</p>
-              <p className="mt-1 text-xl font-extrabold text-slate-900">
-                {initialStockKnown
-                  ? formatQty(initialStock)
-                  : '—'}
-              </p>
-              <p className="mt-0.5 text-sm font-bold text-slate-700">
-                {initialStockKnown ? stockValue(initialStock) : '—'}
               </p>
             </div>
           </div>

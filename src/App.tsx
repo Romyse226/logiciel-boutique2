@@ -1328,7 +1328,7 @@ function HomeView({
       {/* Légende des feux tricolores */}
       <section className="space-y-2 pt-1">
         <h2 className="text-sm font-bold uppercase tracking-wide text-slate-500">État du stock</h2>
-        <StockLegend products={products} />
+        <StockLegend products={products} storeId={store?.id ?? null} />
       </section>
 
       {/* Bannière Espace Boss — visible uniquement pour le boss, tout en bas */}
@@ -1360,9 +1360,10 @@ function Tile({ icon: Icon, title, subtitle, color, onClick }: {
   icon: LucideIcon; title: string; subtitle: string; color: string; onClick: () => void;
 }) {
   const c = colorOf(color);
+  const iconBackground = color === 'orange' ? 'bg-[#f97316]' : c.bg;
   return (
     <button type="button" onClick={onClick} className="flex flex-col items-start gap-2 rounded-2xl bg-white p-4 text-left shadow-sm ring-1 ring-slate-200 transition hover:shadow-md hover:ring-slate-300 active:scale-[0.98]">
-      <span className={classNames('inline-flex rounded-xl p-2.5 text-white shadow-sm', c.bg)}>
+      <span className={classNames('inline-flex rounded-xl p-2.5 text-white shadow-sm', iconBackground)}>
         <Icon size={24} />
       </span>
       <div>

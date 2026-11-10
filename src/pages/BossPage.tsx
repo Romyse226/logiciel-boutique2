@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { Product, Sale } from '@/types';
-import { fetchSales } from '@/lib/supabase';
+import type { Product, Sale, SoldStockTotals } from '@/types';
+import { fetchSales, fetchSoldStockTotals } from '@/lib/supabase';
 import { userMessage } from '@/lib/errors';
-import { classNames, formatFCFA, vibrate } from '@/lib/format';
+import { classNames, formatFCFA, formatQty, vibrate } from '@/lib/format';
 import { isDetailUnit, isGrosUnit } from '@/lib/product';
 import { usePullToRefresh, PullToRefreshBar } from '@/lib/usePullToRefresh';
 import { Skeleton } from '@/components/Skeleton';
@@ -53,6 +53,7 @@ interface Props {
 export function BossPage({ supabaseOnline, onOpenEmployees, products, storeId }: Props) {
   const [period, setPeriod] = useState<Period>('today');
   const [sales, setSales] = useState<Sale[]>([]);
+  const [sold, setSold] = useState<SoldStockTotals>({ quantity: 0, value: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -60,13 +61,18 @@ export function BossPage({ supabaseOnline, onOpenEmployees, products, storeId }:
     if (!supabaseOnline) { setLoading(false); return; }
     setLoading(true); setError(null);
     try {
-      setSales(await fetchSales(500));
+      const [saleRows, soldTotals] = await Promise.all([
+        fetchSales(500),
+        fetchSoldStockTotals(storeId),
+      ]);
+      setSales(saleRows);
+      setSold(soldTotals);
     } catch (e) {
       setError(userMessage(e));
     } finally {
       setLoading(false);
     }
-  }, [supabaseOnline]);
+  }, [supabaseOnline, storeId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -84,19 +90,24 @@ export function BossPage({ supabaseOnline, onOpenEmployees, products, storeId }:
 
   const salesTotal = inRange.reduce((sum, s) => sum + s.total, 0);
   const countTotal = inRange.length;
-  const stockValue = products.reduce((sum, product) => {
-    if (product.store_id != null && product.store_id !== storeId) return sum;
+  const remaining = products.reduce((totals, product) => {
+    if (product.store_id != null && product.store_id !== storeId) return totals;
     const quantity = Number(product.stock_qty);
-    if (!Number.isFinite(quantity) || quantity <= 0) return sum;
+    if (!Number.isFinite(quantity) || quantity <= 0) return totals;
+    totals.quantity += quantity;
 
     const units = product.sale_units ?? [];
     const detail = units.find((unit) => isDetailUnit(unit.unit) && unit.price > 0);
     const gros = units.find((unit) => isGrosUnit(unit.unit) && unit.price > 0);
     const unit = detail ?? gros;
-    if (!unit || !Number.isFinite(unit.factor_to_stock) || unit.factor_to_stock <= 0) return sum;
+    if (!unit || !Number.isFinite(unit.factor_to_stock) || unit.factor_to_stock <= 0) {
+      totals.priced = false;
+      return totals;
+    }
 
-    return sum + quantity * unit.price / unit.factor_to_stock;
-  }, 0);
+    totals.value += quantity * unit.price / unit.factor_to_stock;
+    return totals;
+  }, { quantity: 0, value: 0, priced: true });
 
   return (
     <div className="space-y-4">
@@ -131,18 +142,10 @@ export function BossPage({ supabaseOnline, onOpenEmployees, products, storeId }:
         <Kpi icon={Coins} color="bg-green-500" label="Ventes du jour" value={formatFCFA(salesTotal)} loading={loading} />
         <Kpi icon={ShoppingCart} color="bg-orange-500" label="Nombre de ventes" value={String(countTotal)} loading={loading} />
         <div className="col-span-2 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
-          <span className="inline-flex rounded-xl bg-violet-500 p-2 text-white shadow-sm">
-            <Package size={20} />
-          </span>
-          <p className="mt-2 text-xs font-bold uppercase tracking-wide text-slate-500">Valeur totale du stock</p>
-          {loading ? (
-            <Skeleton className="mt-2 h-6 w-32" />
-          ) : (
-            <p className="mt-0.5 text-xl font-extrabold text-slate-800">{formatFCFA(stockValue)}</p>
-          )}
-          <p className="mt-1 text-xs text-slate-500">
-            Valeur totale estimée aux prix des produits disponibles dans le stock
-          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <StockSummary icon={ShoppingCart} color="bg-green-500" label="Stock vendu" quantity={sold.quantity} value={sold.value} loading={loading} />
+            <StockSummary icon={Package} color="bg-blue-500" label="Stock restant (actuel)" quantity={remaining.quantity} value={remaining.priced ? remaining.value : null} loading={loading} />
+          </div>
         </div>
       </div>
 
@@ -157,6 +160,35 @@ export function BossPage({ supabaseOnline, onOpenEmployees, products, storeId }:
         <h2 className="text-sm font-bold uppercase tracking-wide text-slate-500">Gestion</h2>
         <NavCard icon={Users} title="Employés" subtitle="Inviter et gérer les accès" onClick={onOpenEmployees} />
       </section>
+    </div>
+  );
+}
+
+function StockSummary({ icon: Icon, color, label, quantity, value, loading }: {
+  icon: typeof Package;
+  color: string;
+  label: string;
+  quantity: number;
+  value: number | null;
+  loading: boolean;
+}) {
+  return (
+    <div className="min-w-0 rounded-xl bg-slate-50 p-3 ring-1 ring-slate-100 sm:p-4">
+      <span className={classNames('inline-flex rounded-lg p-2 text-white shadow-sm', color)}>
+        <Icon size={18} />
+      </span>
+      <p className="mt-2 text-xs font-bold uppercase tracking-wide text-slate-500">{label}</p>
+      {loading ? (
+        <>
+          <Skeleton className="mt-2 h-6 w-20" />
+          <Skeleton className="mt-2 h-4 w-24" />
+        </>
+      ) : (
+        <>
+          <p className="mt-0.5 break-words text-lg font-extrabold text-slate-800 sm:text-xl">{formatQty(quantity)}</p>
+          <p className="mt-0.5 break-words text-sm font-bold text-slate-700">{value == null ? '—' : formatFCFA(value)}</p>
+        </>
+      )}
     </div>
   );
 }

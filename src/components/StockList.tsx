@@ -37,7 +37,7 @@ export function productsOfKind(products: Product[], kind: StockKind): Product[] 
 }
 
 /** Les gros boutons colorés + le pop-up listant les produits concernés. */
-export function StockLegend({ products }: { products: Product[] }) {
+export function StockLegend({ products, storeId }: { products: Product[]; storeId: string | null }) {
   const [open, setOpen] = useState<StockKind | null>(null);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
 
@@ -74,6 +74,7 @@ export function StockLegend({ products }: { products: Product[] }) {
         <ProductStockDetailSheet
           key={selectedProduct.id}
           product={selectedProduct}
+          storeId={storeId}
           onClose={() => setSelectedProduct(null)}
         />
       )}
