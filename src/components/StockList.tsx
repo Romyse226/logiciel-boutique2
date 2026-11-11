@@ -172,8 +172,8 @@ export function StockListSheet({
                         </p>
                       </div>
                       <div className="shrink-0 text-right">
-                        {gros > 0 && <p className="text-xs font-bold text-slate-600">Gros {formatFCFA(gros)}</p>}
-                        {detail > 0 && <p className="text-xs font-bold text-slate-600">Détail {formatFCFA(detail)}</p>}
+                        {gros > 0 && <p className="text-xs font-bold text-slate-600">{formatFCFA(gros)}</p>}
+                        {detail > 0 && <p className="text-xs font-bold text-slate-600">{formatFCFA(detail)}</p>}
                       </div>
                     </button>
                   </li>
