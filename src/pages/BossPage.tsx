@@ -144,7 +144,7 @@ export function BossPage({ supabaseOnline, onOpenEmployees, products, storeId }:
         <div className="col-span-2 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
           <div className="grid grid-cols-2 gap-3">
             <StockSummary icon={ShoppingCart} color="bg-green-500" label="Stock vendu" quantity={sold.quantity} value={sold.value} loading={loading} />
-            <StockSummary icon={Package} color="bg-blue-500" label="Stock restant (actuel)" quantity={remaining.quantity} value={remaining.priced ? remaining.value : null} loading={loading} />
+            <StockSummary icon={Package} color="bg-blue-500" label="Stock restant" quantity={remaining.quantity} value={remaining.priced ? remaining.value : null} loading={loading} />
           </div>
         </div>
       </div>

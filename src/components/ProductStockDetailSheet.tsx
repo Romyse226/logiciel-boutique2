@@ -83,6 +83,7 @@ export function ProductStockDetailSheet({ product: initialProduct, storeId, onCl
     stockAfterMovement += Number(movement.delta);
     return {
       id: movement.id,
+      reason: movement.reason,
       delta: Number(movement.delta),
       stockAfter: stockAfterMovement,
       created_at: movement.created_at,
@@ -93,6 +94,7 @@ export function ProductStockDetailSheet({ product: initialProduct, storeId, onCl
     ? [
         {
           id: 'initial-stock',
+          reason: 'adjustment' as const,
           delta: initialStock,
           stockAfter: initialStock,
           created_at: openingMovement?.created_at ?? productCreatedAt ?? history[0]?.created_at ?? new Date().toISOString(),
@@ -172,7 +174,7 @@ export function ProductStockDetailSheet({ product: initialProduct, storeId, onCl
               </p>
             </div>
             <div className="rounded-2xl bg-blue-50 p-3 ring-1 ring-blue-100">
-              <p className="text-xs font-semibold text-blue-700">Stock restant (actuel)</p>
+              <p className="text-xs font-semibold text-blue-700">Stock restant</p>
               <p className="mt-1 text-xl font-extrabold text-blue-900">
                 {Number.isFinite(currentStock) ? formatQty(currentStock) : '—'}
               </p>
@@ -196,6 +198,15 @@ export function ProductStockDetailSheet({ product: initialProduct, storeId, onCl
             <ol className="space-y-2">
               {timeline.map((movement) => {
                 const incoming = movement.delta >= 0;
+                const title = movement.id === 'initial-stock'
+                  ? 'Création de produit'
+                  : movement.reason === 'sale'
+                    ? 'Vente effectuée'
+                    : movement.reason === 'adjustment'
+                      ? 'Modification de stock'
+                      : movement.reason === 'arrival'
+                        ? 'Arrivage de stock'
+                        : 'Annulation';
                 return (
                   <li key={movement.id} className="flex items-center gap-3 rounded-2xl bg-white p-3 ring-1 ring-slate-200">
                     <span className={`min-w-[4.25rem] rounded-xl px-2 py-1.5 text-center text-sm font-extrabold ${
@@ -204,6 +215,9 @@ export function ProductStockDetailSheet({ product: initialProduct, storeId, onCl
                       {incoming ? '+' : '−'}{formatQty(Math.abs(movement.delta))}
                     </span>
                     <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-extrabold text-slate-800">
+                        {title}
+                      </span>
                       <span className="block text-sm font-semibold text-slate-700">
                         {formatDateTime(movement.created_at)}
                       </span>

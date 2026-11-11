@@ -9,7 +9,7 @@ export type StockKind = 'ok' | 'out';
 
 interface KindMeta {
   kind: StockKind;
-  emoji: string;
+
   label: string;
   title: string;
   icon: typeof PackageCheck;
@@ -18,8 +18,8 @@ interface KindMeta {
 }
 
 export const STOCK_KINDS: KindMeta[] = [
-  { kind: 'ok', emoji: '🟢', label: 'Vert : Stock suffisant', title: 'Stock suffisant', icon: PackageCheck, wrap: 'bg-green-50 ring-green-200 text-green-800', solid: 'bg-green-500' },
-  { kind: 'out', emoji: '🔴', label: 'Rouge : Rupture de stock', title: 'Rupture de stock', icon: PackageX, wrap: 'bg-red-50 ring-red-200 text-red-800', solid: 'bg-red-500' },
+  { kind: 'ok',  label: 'Stock suffisant', title: 'Stock suffisant', icon: PackageCheck, wrap: 'bg-green-50 ring-green-200 text-green-800', solid: 'bg-green-500' },
+  { kind: 'out', label: 'Stock épuisé', title: 'Stock épuisé', icon: PackageX, wrap: 'bg-red-50 ring-red-200 text-red-800', solid: 'bg-red-500' },
 ];
 
 /**
@@ -44,7 +44,7 @@ export function StockLegend({ products, storeId }: { products: Product[]; storeI
   return (
     <>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        {STOCK_KINDS.map(({ kind, emoji, label, wrap, solid }) => {
+        {STOCK_KINDS.map(({ kind, label, wrap, solid }) => {
           const count = productsOfKind(products, kind).length;
           return (
             <button
@@ -59,7 +59,7 @@ export function StockLegend({ products, storeId }: { products: Product[]; storeI
               >
                 {count}
               </span>
-              <span className="min-w-0 flex-1 text-sm font-bold leading-tight">{emoji} {label}</span>
+              <span className="min-w-0 flex-1 text-sm font-bold leading-tight">{label}</span>
             </button>
           );
         })}

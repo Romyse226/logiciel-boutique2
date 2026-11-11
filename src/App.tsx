@@ -753,7 +753,7 @@ export default function App() {
             </span>
             <div className="min-w-0 text-left">
               <h1 className="truncate text-base font-extrabold text-slate-800">{store?.name ?? 'Quincaillerie'}</h1>
-              <p className="truncate text-[11px] text-slate-500">{sellerName} · Côte d'Ivoire</p>
+              <p className="truncate text-[11px] text-slate-500">Profil : {sellerName}</p>
             </div>
           </button>
           <SupabaseStatus compact />
@@ -1299,9 +1299,7 @@ function HomeView({
 
   return (
     <div className="space-y-4 lg:grid lg:min-h-[calc(100vh-12rem)] lg:content-center lg:grid-cols-2 lg:gap-6 lg:space-y-0">
-      {/* Colonne 1 (mobile : simplement empilée) : en-tête boutique + raccourcis */}
-      <div className="space-y-4 lg:flex lg:flex-col lg:justify-center lg:gap-6 lg:space-y-0">
-      <section className="overflow-hidden rounded-3xl bg-gradient-to-br from-orange-500 via-orange-500 to-amber-500 p-6 text-white shadow-lg">
+      <section className="overflow-hidden rounded-3xl bg-gradient-to-br from-orange-500 via-orange-500 to-amber-500 p-6 text-white shadow-lg lg:col-span-2 lg:py-7">
         <p className="text-sm font-semibold text-white/80"></p>
         <h2 className="text-3xl font-extrabold leading-tight">{store?.name ?? 'Quincaillerie'}</h2>
         <p className="mt-1 text-sm text-white/90">{store?.address}</p>
@@ -1317,6 +1315,8 @@ function HomeView({
         </div>
       </section>
 
+      {/* Colonne 1 : raccourcis */}
+      <div>
       <div className="grid grid-cols-2 gap-3">
         <Tile icon={ShoppingCart} title="Vendre" subtitle="Encaisser une vente" color="orange" onClick={() => onGo('sell')} />
         <Tile icon={History} title="Historique" subtitle="Ventes & stock" color="green" onClick={() => onOpenHistory('sales')} />
