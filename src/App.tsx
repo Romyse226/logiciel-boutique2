@@ -1299,7 +1299,7 @@ function HomeView({
 
   return (
     <div className="space-y-4 lg:grid lg:min-h-[calc(100vh-12rem)] lg:content-center lg:grid-cols-2 lg:gap-6 lg:space-y-0">
-      <section className="overflow-hidden rounded-3xl bg-gradient-to-br from-orange-500 via-orange-500 to-amber-500 p-6 text-white shadow-lg lg:col-span-2 lg:py-7">
+      <section className="overflow-hidden rounded-3xl bg-gradient-to-br from-orange-500 via-orange-500 to-amber-500 px-6 py-8 text-white shadow-lg lg:col-span-2 lg:py-12">
         <p className="text-sm font-semibold text-white/80"></p>
         <h2 className="text-3xl font-extrabold leading-tight">{store?.name ?? 'Quincaillerie'}</h2>
         <p className="mt-1 text-sm text-white/90">{store?.address}</p>
