@@ -261,7 +261,17 @@ Deno.serve(async (request) => {
       const storeSlug = typeof body.slug === 'string' ? body.slug.trim().toLowerCase() : '';
       const pin = typeof body.pin === 'string' ? body.pin : '';
       if (!storeName || !ownerName || !phone || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(storeSlug) || !/^\d{4}$/.test(pin)) {
-        return response(400, { ok: false, error: 'Check the store details and enter a four-digit PIN.' }, origin!);
+        const invalidFields = [
+          !storeName && 'store name',
+          !ownerName && 'owner name',
+          !phone && 'valid phone number',
+          !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(storeSlug) && 'store address',
+          !/^\d{4}$/.test(pin) && 'four-digit PIN',
+        ].filter((field): field is string => Boolean(field));
+        return response(400, {
+          ok: false,
+          error: `Check these fields: ${invalidFields.join(', ')}.`,
+        }, origin!);
       }
 
       const { data, error } = await getAdminClient().rpc('create_store_owner', {
@@ -272,11 +282,20 @@ Deno.serve(async (request) => {
         p_pin: pin,
       });
       if (error) {
-        return response(409, { ok: false, error: 'This store slug may already be in use. Choose another store name.' }, origin!);
+        console.error('create_store_owner RPC failed', { code: error.code, message: error.message });
+        const duplicateSlug = error.code === '23505'
+          && `${error.message} ${error.details ?? ''}`.includes('stores_slug_unique');
+        if (duplicateSlug) {
+          return response(409, { ok: false, error: 'This store slug may already be in use. Choose another store name.' }, origin!);
+        }
+        if (error.code === '42883') {
+          return response(500, { ok: false, error: 'The authentication database migration is missing or incomplete. Apply the latest migration.' }, origin!);
+        }
+        return response(500, { ok: false, error: 'Store creation failed. Check the Supabase function logs.' }, origin!);
       }
-      const result = data as { ok?: boolean; employee_id?: string; name?: string; slug?: string };
+      const result = data as { ok?: boolean; employee_id?: string; name?: string; slug?: string; error?: string };
       if (!result?.ok || !result.employee_id || !result.slug) {
-        return response(400, { ok: false, error: 'Store registration could not be completed.' }, origin!);
+        return response(400, { ok: false, error: result?.error ?? 'Store registration could not be completed.' }, origin!);
       }
       const session = await createSession(result.employee_id, null);
       return response(200, ok({
