@@ -4,7 +4,7 @@ import {
   Check, ArrowRight, Delete, LogOut,
 } from 'lucide-react';
 import { classNames, formatFCFA, vibrate } from '@/lib/format';
-import { getHostContext, slugFromName, storeUrl } from '@/lib/tenant';
+import { getHostContext, slugFromName, storeUrl, usesPathRouting } from '@/lib/tenant';
 import { userMessage } from '@/lib/errors';
 import { SupabaseStatus } from '@/components/SupabaseStatus';
 import { Skeleton, SkeletonCard } from '@/components/Skeleton';
@@ -136,6 +136,7 @@ export default function App() {
   const [pendingDelete, setPendingDelete] = useState<Product | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [signOutConfirmOpen, setSignOutConfirmOpen] = useState(false);
   const identityBootstrapStarted = useRef(false);
 
   const cart = useCart();
@@ -275,6 +276,11 @@ export default function App() {
         if (sessionData.session) {
           const employee = await getAuthenticatedEmployee();
           if (employee) {
+            if (usesPathRouting() && host.root && employee.store_slug) {
+              const query = window.location.search;
+              const hash = window.location.hash;
+              window.history.replaceState({}, '', `/store/${employee.store_slug}${query}${hash}`);
+            }
             applyAuthenticatedEmployee(employee);
             clearLegacyIdentity();
             return;
@@ -347,11 +353,16 @@ export default function App() {
       pin: input.pin,
       slug: input.slug,
     });
-    if (!result.ok || !result.slug) return result.error ?? 'Création de la boutique impossible.';
+    if (!result.ok || !result.slug || !result.session) return result.error ?? 'Création de la boutique impossible.';
     const destination = storeUrl(result.slug);
     if (!destination) return 'Configure VITE_BASE_DOMAIN pour ouvrir la boutique créée.';
-    window.location.assign(destination);
-    return null;
+    try {
+      await applyPortalSession(result);
+      window.location.assign(destination);
+      return null;
+    } catch (error) {
+      return userMessage(error);
+    }
   }
 
   async function handleVerifyRecovery(phone: string, code: string): Promise<{ token?: string; error?: string }> {
@@ -750,20 +761,22 @@ export default function App() {
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/70">
         <div className="mx-auto flex max-w-4xl items-center justify-between gap-3 px-4 py-3 pt-[calc(0.75rem+env(safe-area-inset-top))] lg:max-w-6xl lg:px-6 2xl:max-w-7xl">
-          <button type="button" onClick={() => go('home')} className="flex min-w-0 items-center gap-2">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-orange-400 to-orange-600 text-white shadow">
-              <StoreIcon size={20} />
-            </span>
-            <div className="min-w-0 text-left">
-              <h1 className="truncate text-base font-extrabold text-slate-800">{store?.name ?? 'Quincaillerie'}</h1>
-              <p className="truncate text-[11px] text-slate-500">Profil : {sellerName}</p>
-            </div>
-          </button>
-          <div className="flex items-center gap-2">
-            <SupabaseStatus compact />
-            <button type="button" onClick={handleSignOut} className="flex h-9 w-9 items-center justify-center rounded-xl text-slate-500 transition hover:bg-slate-100 hover:text-red-600" aria-label="Se déconnecter" title="Se déconnecter">
+          <div className="flex min-w-0 items-center gap-2">
+            <button type="button" onClick={() => setSignOutConfirmOpen(true)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-red-50 hover:text-red-600" aria-label="Se déconnecter" title="Se déconnecter">
               <LogOut size={18} />
             </button>
+            <button type="button" onClick={() => go('home')} className="flex min-w-0 items-center gap-2">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-orange-400 to-orange-600 text-white shadow">
+                <StoreIcon size={20} />
+              </span>
+              <div className="min-w-0 text-left">
+                <h1 className="truncate text-base font-extrabold text-slate-800">{store?.name ?? 'Quincaillerie'}</h1>
+                <p className="truncate text-[11px] text-slate-500">Profil : {sellerName}</p>
+              </div>
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <SupabaseStatus compact />
           </div>
         </div>
       </header>
@@ -900,6 +913,23 @@ export default function App() {
               </button>
               <button type="button" onClick={confirmDelete} disabled={deleting} className="flex-1 rounded-xl bg-red-600 px-4 py-3 text-sm font-bold text-white disabled:opacity-50">
                 {deleting ? 'Suppression…' : 'Supprimer'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {signOutConfirmOpen && (
+        <div className="fixed inset-0 z-[70] flex items-end justify-center sm:items-center" role="dialog" aria-modal="true" aria-labelledby="sign-out-title">
+          <button type="button" className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={() => setSignOutConfirmOpen(false)} aria-label="Fermer" />
+          <div className="relative z-10 w-full max-w-md rounded-t-3xl bg-white p-5 shadow-2xl sm:rounded-3xl">
+            <h2 id="sign-out-title" className="text-base font-extrabold text-slate-800">Souhaitez-vous vraiment vous déconnecter ?</h2>
+            <div className="mt-4 flex gap-2">
+              <button type="button" onClick={() => setSignOutConfirmOpen(false)} className="flex-1 rounded-xl bg-slate-100 px-4 py-3 text-sm font-bold text-slate-700">
+                Annuler
+              </button>
+              <button type="button" onClick={() => { setSignOutConfirmOpen(false); void handleSignOut(); }} className="flex-1 rounded-xl bg-red-600 px-4 py-3 text-sm font-bold text-white">
+                Me déconnecter
               </button>
             </div>
           </div>
@@ -1042,9 +1072,16 @@ function AuthPage({
 
   async function submitLogin() {
     if (busy || pin.length !== 4) return;
+    if (host.root && usesPathRouting() && !slug) {
+      setError('Renseigne le nom de ta boutique pour retrouver son adresse.');
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
+      if (host.root && usesPathRouting() && slug) {
+        window.history.replaceState({}, '', `/store/${slug}`);
+      }
       const message = await onLogin(phone, pin);
       if (message) {
         setError(message);
@@ -1156,6 +1193,13 @@ function AuthPage({
 
         {step === 'login' && (
           <>
+            {host.root && usesPathRouting() && (
+              <label className="mt-6 block">
+                <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Nom de ta boutique</span>
+                <input value={storeName} onChange={(event) => { setStoreName(event.target.value); setSlug(slugFromName(event.target.value)); }} autoComplete="organization" placeholder="Ex. : Boutique du Centre" className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm outline-none focus:border-orange-400" />
+                {slug && <span className="mt-1 block text-xs text-slate-400">Adresse : /store/{slug}</span>}
+              </label>
+            )}
             <p className="mb-1 mt-4 block text-xs font-bold uppercase tracking-wide text-slate-500">PIN à 4 chiffres</p>
             <PinDots count={pin.length} />
             <div className="mt-3">
@@ -1169,9 +1213,21 @@ function AuthPage({
             >
               <Check size={20} /> {busy ? 'Connexion…' : 'Se connecter'}
             </button>
-            <button type="button" onClick={() => { setStep('forgot'); setError(null); }} className="mt-3 w-full text-center text-sm font-semibold text-slate-500">
+            <button type="button" onClick={() => {
+              if (host.root && usesPathRouting()) {
+                if (!slug) { setError('Renseigne le nom de ta boutique pour retrouver son adresse.'); return; }
+                window.history.replaceState({}, '', `/store/${slug}`);
+              }
+              setStep('forgot');
+              setError(null);
+            }} className="mt-3 w-full text-center text-sm font-semibold text-slate-500">
               PIN oublié ?
             </button>
+            {host.root && usesPathRouting() && (
+              <button type="button" onClick={() => { window.history.replaceState({}, '', '/'); setStep('signup'); setError(null); }} className="mt-3 w-full text-center text-sm font-semibold text-orange-600">
+                Première visite ? Créer une boutique
+              </button>
+            )}
           </>
         )}
 
@@ -1201,6 +1257,11 @@ function AuthPage({
             <button type="button" onClick={submitSignup} disabled={busy || pin.length !== 4} className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 px-4 py-3.5 text-base font-bold text-white shadow disabled:opacity-60">
               <Check size={20} /> {busy ? 'Création…' : 'Créer ma boutique'}
             </button>
+            {host.root && usesPathRouting() && (
+              <button type="button" onClick={() => { setStep('login'); setError(null); }} className="mt-3 w-full text-center text-sm font-semibold text-slate-500">
+                Déjà une boutique ? Se connecter
+              </button>
+            )}
           </>
         )}
 

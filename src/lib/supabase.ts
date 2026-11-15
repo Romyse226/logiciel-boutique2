@@ -1,4 +1,5 @@
 import { createClient, type Session, type SupabaseClient } from '@supabase/supabase-js';
+import { getHostContext, usesPathRouting } from '@/lib/tenant';
 import type {
   Product, ProductCategory, Sale, StoreInfo, StockMovement,
   RegisterSaleResult, RegisterSaleInput, ArrivalResult, ProductInput, SoldStockTotals,
@@ -90,7 +91,10 @@ export const supabase: SupabaseClient | null = isSupabaseConfigured
 
 export async function authPortal(input: Record<string, string>): Promise<AuthPortalResult> {
   if (!supabase) return { ok: false, error: 'Supabase non configure.' };
-  const { data, error } = await supabase.functions.invoke<AuthPortalResult>('auth-portal', { body: input });
+  const body = usesPathRouting() && input.action !== 'signup'
+    ? { ...input, tenantSlug: getHostContext().slug ?? '' }
+    : input;
+  const { data, error } = await supabase.functions.invoke<AuthPortalResult>('auth-portal', { body });
   if (!error && data) return data;
 
   const context = error?.context;

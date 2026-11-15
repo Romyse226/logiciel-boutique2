@@ -7,6 +7,8 @@ const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
 const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const baseDomain = (Deno.env.get('BASE_DOMAIN') ?? '').toLowerCase().replace(/^\.+|\.+$/g, '');
 const rateLimitSecret = Deno.env.get('PIN_RATE_LIMIT_SECRET') ?? '';
+const pathRouting = Deno.env.get('TENANT_ROUTING_MODE') === 'path'
+  || (!Deno.env.get('TENANT_ROUTING_MODE') && baseDomain.endsWith('.vercel.app'));
 
 const admin = createClient(supabaseUrl, serviceRoleKey, {
   auth: { autoRefreshToken: false, persistSession: false },
@@ -27,7 +29,7 @@ function isAllowedOrigin(origin: string | null): boolean {
   } catch {
     return false;
   }
-  if (baseDomain && (host === baseDomain || host.endsWith(`.${baseDomain}`))) return true;
+  if (baseDomain && (host === baseDomain || (!pathRouting && host.endsWith(`.${baseDomain}`)))) return true;
   return baseDomain === 'localhost' && isLocalHost(host);
 }
 
@@ -208,7 +210,6 @@ Deno.serve(async (request) => {
     const body = await request.json() as JsonRecord;
     const action = typeof body.action === 'string' ? body.action : '';
     const host = hostForOrigin(origin!);
-    const slug = storeSlugForHost(host);
 
     if (action === 'signup') {
       if (!isRootHost(host)) return response(403, { ok: false, error: 'Store registration must start at the main domain' }, origin!);
@@ -235,14 +236,28 @@ Deno.serve(async (request) => {
       if (error) {
         return response(409, { ok: false, error: 'This store slug may already be in use. Choose another store name.' }, origin!);
       }
-      const result = data as { ok?: boolean; store_id?: string; employee_id?: string; slug?: string };
-      if (!result?.ok || !result.slug) {
+      const result = data as { ok?: boolean; employee_id?: string; name?: string; slug?: string };
+      if (!result?.ok || !result.employee_id || !result.slug) {
         return response(400, { ok: false, error: 'Store registration could not be completed.' }, origin!);
       }
-      return response(200, ok({ slug: result.slug }), origin!);
+      const session = await createSession(result.employee_id, null);
+      return response(200, ok({
+        session,
+        employeeId: result.employee_id,
+        name: result.name ?? ownerName,
+        isOwner: true,
+        slug: result.slug,
+      }), origin!);
     }
 
-    if (!slug) return response(400, { ok: false, error: 'Open this store using its subdomain.' }, origin!);
+    const requestedSlug = typeof body.tenantSlug === 'string' ? body.tenantSlug.trim().toLowerCase() : '';
+    const slug = pathRouting
+      ? (/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(requestedSlug) ? requestedSlug : null)
+      : storeSlugForHost(host);
+    if (!slug) {
+      const location = pathRouting ? 'its /store/<slug> address' : 'its subdomain';
+      return response(400, { ok: false, error: `Open this store using ${location}.` }, origin!);
+    }
     if (!await enforceRateLimit(request, `${action}:${slug}`)) {
       return response(429, { ok: false, error: 'Too many requests. Try again later.' }, origin!);
     }
