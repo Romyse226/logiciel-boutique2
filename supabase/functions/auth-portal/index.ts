@@ -2,20 +2,31 @@ import { createClient, type Session, type SupabaseClient } from 'https://esm.sh/
 
 type JsonRecord = Record<string, unknown>;
 
+function getSupabaseKey(legacyName: string, keySetName: string): string {
+  const legacyKey = Deno.env.get(legacyName)?.trim();
+  if (legacyKey) return legacyKey;
+
+  const keySet = Deno.env.get(keySetName);
+  if (!keySet) return '';
+  try {
+    const parsed = JSON.parse(keySet) as Record<string, unknown>;
+    return typeof parsed.default === 'string' ? parsed.default : '';
+  } catch {
+    return '';
+  }
+}
+
 const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
-const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
-const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-const baseDomain = (Deno.env.get('BASE_DOMAIN') ?? '').toLowerCase().replace(/^\.+|\.+$/g, '');
+const anonKey = getSupabaseKey('SUPABASE_ANON_KEY', 'SUPABASE_PUBLISHABLE_KEYS');
+const serviceRoleKey = getSupabaseKey('SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_SECRET_KEYS');
+const productionHost = 'logicielboutique.vercel.app';
+const baseDomain = (Deno.env.get('BASE_DOMAIN') ?? productionHost).toLowerCase().replace(/^\.+|\.+$/g, '');
 const rateLimitSecret = Deno.env.get('PIN_RATE_LIMIT_SECRET') ?? '';
 const pathRouting = Deno.env.get('TENANT_ROUTING_MODE') === 'path'
   || (!Deno.env.get('TENANT_ROUTING_MODE') && baseDomain.endsWith('.vercel.app'));
 
-const admin = createClient(supabaseUrl, serviceRoleKey, {
-  auth: { autoRefreshToken: false, persistSession: false },
-});
-const publicClient = createClient(supabaseUrl, anonKey, {
-  auth: { autoRefreshToken: false, persistSession: false },
-});
+let admin: SupabaseClient | null = null;
+let publicClient: SupabaseClient | null = null;
 
 function isLocalHost(host: string): boolean {
   return host === 'localhost' || host.endsWith('.localhost') || host === '127.0.0.1';
@@ -29,8 +40,19 @@ function isAllowedOrigin(origin: string | null): boolean {
   } catch {
     return false;
   }
+  if (host === productionHost) return true;
   if (baseDomain && (host === baseDomain || (!pathRouting && host.endsWith(`.${baseDomain}`)))) return true;
   return baseDomain === 'localhost' && isLocalHost(host);
+}
+
+function getAdminClient(): SupabaseClient {
+  if (!admin) throw new Error('Authentication service is not initialized');
+  return admin;
+}
+
+function getPublicClient(): SupabaseClient {
+  if (!publicClient) throw new Error('Authentication service is not initialized');
+  return publicClient;
 }
 
 function hostForOrigin(origin: string): string {
@@ -59,7 +81,7 @@ function response(
   body: JsonRecord,
   origin: string,
 ): Response {
-  return new Response(JSON.stringify(body), {
+  return new Response(status === 204 ? null : JSON.stringify(body), {
     status,
     headers: {
       'Content-Type': 'application/json',
@@ -106,7 +128,7 @@ async function enforceRateLimit(request: Request, scope: string): Promise<boolea
   if (!ip) return false;
 
   const keyHash = await hmacHex(`${scope}:${ip}`);
-  const { data, error } = await admin.rpc('consume_auth_ip_limit', { p_key_hash: keyHash });
+  const { data, error } = await getAdminClient().rpc('consume_auth_ip_limit', { p_key_hash: keyHash });
   if (error) throw new Error('Rate limit could not be checked');
   return data === true;
 }
@@ -117,7 +139,7 @@ function accountEmail(employeeId: string): string {
 
 async function findAuthUserId(email: string): Promise<string | null> {
   for (let page = 1; page <= 20; page += 1) {
-    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 1000 });
+    const { data, error } = await getAdminClient().auth.admin.listUsers({ page, perPage: 1000 });
     if (error) throw new Error('Auth account lookup failed');
     const user = data.users.find((candidate) => candidate.email?.toLowerCase() === email.toLowerCase());
     if (user) return user.id;
@@ -131,7 +153,7 @@ async function ensureAuthUser(employeeId: string, linkedUserId: string | null): 
 
   const email = accountEmail(employeeId);
   let userId: string | null = null;
-  const { data, error } = await admin.auth.admin.createUser({
+  const { data, error } = await getAdminClient().auth.admin.createUser({
     email,
     password: randomHex(32),
     email_confirm: true,
@@ -144,7 +166,7 @@ async function ensureAuthUser(employeeId: string, linkedUserId: string | null): 
     if (!userId) throw new Error('Auth account could not be created');
   }
 
-  const { data: linked, error: linkError } = await admin.rpc('link_employee_auth', {
+  const { data: linked, error: linkError } = await getAdminClient().rpc('link_employee_auth', {
     p_employee_id: employeeId,
     p_auth_user_id: userId,
   });
@@ -155,11 +177,11 @@ async function ensureAuthUser(employeeId: string, linkedUserId: string | null): 
 async function createSession(employeeId: string, linkedUserId: string | null): Promise<Session> {
   const userId = await ensureAuthUser(employeeId, linkedUserId);
   const email = accountEmail(employeeId);
-  const { data, error } = await admin.auth.admin.generateLink({ type: 'magiclink', email });
+  const { data, error } = await getAdminClient().auth.admin.generateLink({ type: 'magiclink', email });
   const tokenHash = data?.properties?.hashed_token;
   if (error || !tokenHash) throw new Error('Supabase Auth session could not be created');
 
-  const { data: verified, error: verifyError } = await publicClient.auth.verifyOtp({
+  const { data: verified, error: verifyError } = await getPublicClient().auth.verifyOtp({
     token_hash: tokenHash,
     type: 'magiclink',
   });
@@ -174,14 +196,14 @@ async function findOwner(slug: string, phone: string): Promise<{
   auth_user_id: string | null;
   status: string;
 }> {
-  const { data: store, error: storeError } = await admin
+  const { data: store, error: storeError } = await getAdminClient()
     .from('stores')
     .select('id')
     .eq('slug', slug)
     .maybeSingle();
   if (storeError || !store) throw new Error('Compte introuvable');
 
-  const { data: employee, error } = await admin
+  const { data: employee, error } = await getAdminClient()
     .from('employees')
     .select('id, auth_user_id, status, phone')
     .eq('store_id', store.id)
@@ -202,11 +224,27 @@ Deno.serve(async (request) => {
   if (!isAllowedOrigin(origin)) return new Response('Origin not allowed', { status: 403 });
   if (request.method === 'OPTIONS') return response(204, {}, origin!);
   if (request.method !== 'POST') return response(405, { ok: false, error: 'Method not allowed' }, origin!);
-  if (!supabaseUrl || !anonKey || !serviceRoleKey) {
-    return response(503, { ok: false, error: 'Authentication service is not configured' }, origin!);
-  }
-
   try {
+    const missingConfiguration = [
+      !supabaseUrl && 'SUPABASE_URL',
+      !anonKey && 'SUPABASE_ANON_KEY or SUPABASE_PUBLISHABLE_KEYS',
+      !serviceRoleKey && 'SUPABASE_SERVICE_ROLE_KEY or SUPABASE_SECRET_KEYS',
+      !rateLimitSecret && 'PIN_RATE_LIMIT_SECRET',
+    ].filter((name): name is string => Boolean(name));
+    if (missingConfiguration.length > 0) {
+      return response(503, {
+        ok: false,
+        error: `Authentication service is missing configuration: ${missingConfiguration.join(', ')}.`,
+      }, origin!);
+    }
+
+    admin = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+    publicClient = createClient(supabaseUrl, anonKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+
     const body = await request.json() as JsonRecord;
     const action = typeof body.action === 'string' ? body.action : '';
     const host = hostForOrigin(origin!);
@@ -226,7 +264,7 @@ Deno.serve(async (request) => {
         return response(400, { ok: false, error: 'Check the store details and enter a four-digit PIN.' }, origin!);
       }
 
-      const { data, error } = await admin.rpc('create_store_owner', {
+      const { data, error } = await getAdminClient().rpc('create_store_owner', {
         p_store_name: storeName,
         p_owner_name: ownerName,
         p_phone: phone,
@@ -269,7 +307,7 @@ Deno.serve(async (request) => {
         return response(400, { ok: false, error: 'Enter the phone number and four-digit PIN.' }, origin!);
       }
 
-      const { data, error } = await admin.rpc('verify_owner_pin', {
+      const { data, error } = await getAdminClient().rpc('verify_owner_pin', {
         p_slug: slug,
         p_phone: phone,
         p_pin: pin,
@@ -306,7 +344,7 @@ Deno.serve(async (request) => {
       }
       await ensureAuthUser(owner.id, owner.auth_user_id);
 
-      const { data, error } = await admin.rpc('verify_owner_recovery_code', {
+      const { data, error } = await getAdminClient().rpc('verify_owner_recovery_code', {
         p_slug: slug,
         p_phone: phone,
         p_code: code,
@@ -327,7 +365,7 @@ Deno.serve(async (request) => {
         return response(400, { ok: false, error: 'The recovery authorization or new PIN is invalid.' }, origin!);
       }
 
-      const { data, error } = await admin.rpc('complete_owner_pin_recovery', {
+      const { data, error } = await getAdminClient().rpc('complete_owner_pin_recovery', {
         p_slug: slug,
         p_phone: phone,
         p_recovery_token: recoveryToken,
@@ -359,7 +397,7 @@ Deno.serve(async (request) => {
       const token = typeof body.token === 'string' ? body.token : '';
       if (token.length < 32) return response(400, { ok: false, error: 'Invitation invalide.' }, origin!);
 
-      const { data: employee, error: employeeError } = await admin
+      const { data: employee, error: employeeError } = await getAdminClient()
         .from('employees')
         .select('id, store_id, name, auth_user_id, status, is_owner, can_edit_catalog, can_add_products, access_token')
         .eq('access_token', token)
@@ -371,7 +409,7 @@ Deno.serve(async (request) => {
         return response(403, { ok: false, error: 'Accès suspendu par le gérant.' }, origin!);
       }
 
-      const { data: store, error: storeError } = await admin
+      const { data: store, error: storeError } = await getAdminClient()
         .from('stores')
         .select('slug')
         .eq('id', employee.store_id)
@@ -381,7 +419,7 @@ Deno.serve(async (request) => {
       }
 
       const session = await createSession(employee.id, employee.auth_user_id);
-      const { data: claimed, error: claimError } = await admin
+      const { data: claimed, error: claimError } = await getAdminClient()
         .from('employees')
         .update({
           status: 'active',
@@ -393,7 +431,7 @@ Deno.serve(async (request) => {
         .select('id')
         .maybeSingle();
       if (claimError || !claimed) {
-        await publicClient.auth.signOut({ scope: 'local' });
+        await getPublicClient().auth.signOut({ scope: 'local' });
         return response(409, { ok: false, error: 'Invitation déjà utilisée. Demande un nouveau lien au gérant.' }, origin!);
       }
 
