@@ -32,12 +32,10 @@ export function normalizeCIphone(input: string): string | null {
   if (!input) return null;
   let digits = input.replace(/\D+/g, '');
   if (digits.length === 0) return null;
+  if (digits.startsWith('00')) digits = digits.slice(2);
   if (digits.startsWith('225')) digits = digits.slice(3);
-  else if (digits.startsWith('00')) digits = digits.slice(2);
-  if (digits.startsWith('0')) digits = digits.slice(1);
-  if (digits.length === 10 && digits.startsWith('0')) digits = digits.slice(1);
   if (digits.length !== 10) return null;
-  return '225' + digits;
+  return `225${digits}`;
 }
 
 export function vibrate(pattern: number | number[] = 30): void {
