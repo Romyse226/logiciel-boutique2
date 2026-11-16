@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Home, ShoppingCart, History, Crown, Plus, Store as StoreIcon,
-  Check, ArrowRight, LogOut,
+  Check, ArrowRight, LogOut, Pencil,
 } from 'lucide-react';
 import { classNames, formatFCFA, vibrate } from '@/lib/format';
 import { getHostContext, slugFromName, storeUrl, usesPathRouting } from '@/lib/tenant';
@@ -26,10 +26,12 @@ import { UNIT_GROS, UNIT_DETAIL, isGrosUnit, isDetailUnit } from '@/lib/product'
 import {
   fetchCategories, fetchProducts, fetchStore, registerSale, fetchSaleWithItems,
   isSupabaseConfigured, pingSupabase, saveProduct, isProductArchived, employeeState,
-  uploadProductImage, deleteProductImage, authPortal, setAuthSession,
+  uploadProductImage, deleteProductImage, uploadStoreIcon, updateStore, authPortal, setAuthSession,
   getAuthenticatedEmployee, signOut as signOutSupabase, supabase, type Actor, type AuthPortalResult,
+  productImagePathFromUrl,
 } from '@/lib/supabase';
 import type { CartLine, Product, ProductCategory, ProductSaleUnit, StoreInfo, Sale, ProductInput } from '@/types';
+import { applyPwaStoreIcon, cacheStoreIcon, cachedStoreIcon, makeStoreIcon } from '@/lib/storeIcon';
 
 type Tab = 'home' | 'sell' | 'history' | 'boss';
 type BossScreen = 'dashboard' | 'employees';
@@ -106,7 +108,7 @@ function decrementProductsStock(products: Product[], lines: CartLine[]): Product
 export default function App() {
   const {
     profile, identityReady, isGerant, canEditCatalog, canAddProducts,
-    legacyEmployee, markIdentityReady, applyOwner, applyEmployee, applyRemoteState,
+    legacyEmployee, markIdentityReady, applyOwner, applyCoOwner, applyEmployee, applyRemoteState,
     clearIdentity, clearLegacyIdentity,
   } = useUser();
   const offline = useOfflineSync();
@@ -117,6 +119,9 @@ export default function App() {
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<ProductCategory[]>([]);
   const [store, setStore] = useState<StoreInfo | null>(null);
+  const [storeIconUrl, setStoreIconUrl] = useState<string | null>(null);
+  const [savingStoreIcon, setSavingStoreIcon] = useState(false);
+  const storeIconInput = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [online, setOnline] = useState<boolean>(isSupabaseConfigured);
@@ -168,7 +173,10 @@ export default function App() {
       ]);
       setCategories(cats);
       setProducts(prods);
-      if (st) setStore(st);
+      if (st) {
+        setStore(st);
+        setStoreIconUrl(st.icon_url ?? cachedStoreIcon(st.id));
+      }
     } catch (e) {
       setLoadError(userMessage(e));
       setOnline(false);
@@ -176,6 +184,10 @@ export default function App() {
       setLoading(false);
     }
   }, [profile.employeeId]);
+
+  useEffect(() => {
+    applyPwaStoreIcon(storeIconUrl);
+  }, [storeIconUrl]);
 
   useEffect(() => {
     if (profile.employeeId) loadAll();
@@ -204,7 +216,12 @@ export default function App() {
           setSuspendedBy(st.suspended_by ?? 'le boss');
         } else {
           setSuspendedBy(null);
-          applyRemoteState({ name: st.name, canEditCatalog: st.can_edit_catalog, canAddProducts: st.can_add_products });
+          applyRemoteState({
+            name: st.name,
+            canEditCatalog: st.can_edit_catalog,
+            canAddProducts: st.can_add_products,
+            isCoOwner: st.is_co_owner,
+          });
         }
       } else if (st.error && !isNetworkError(st.error)) {
         setSuspendedBy(st.suspended_by ?? 'le boss');
@@ -222,6 +239,8 @@ export default function App() {
     setSuspendedBy(null);
     if (employee.is_owner) {
       applyOwner({ employeeId: employee.employee_id, name: employee.name });
+    } else if (employee.is_co_owner) {
+      applyCoOwner({ employeeId: employee.employee_id, name: employee.name });
     } else {
       applyEmployee({
         employeeId: employee.employee_id,
@@ -230,7 +249,7 @@ export default function App() {
         canAddProducts: employee.can_add_products,
       });
     }
-  }, [applyEmployee, applyOwner]);
+  }, [applyCoOwner, applyEmployee, applyOwner]);
 
   const applyPortalSession = useCallback(async (result: AuthPortalResult) => {
     if (!result.ok || !result.session) {
@@ -343,13 +362,14 @@ export default function App() {
   // actualisation, retour de veille, retour du réseau…).
   useEffect(() => {
     if (profile.employeeId) return;
-    if (!isSupabaseConfigured || !supabase) return;
+    const client = supabase;
+    if (!isSupabaseConfigured || !client) return;
 
     let cancelled = false;
     const tryLoad = async () => {
       if (cancelled) return;
       try {
-        const { data } = await supabase.auth.getSession();
+        const { data } = await client.auth.getSession();
         if (cancelled || !data.session) return;
         const employee = await getAuthenticatedEmployee();
         if (cancelled || !employee) return;
@@ -476,6 +496,7 @@ export default function App() {
       clearLegacyIdentity();
       setSuspendedBy(null);
       setStore(null);
+      setStoreIconUrl(null);
       setProducts([]);
       setCategories([]);
       setTab('home');
@@ -650,22 +671,53 @@ export default function App() {
     setProducts((prev) => [prod, ...prev].sort((a, b) => a.name.localeCompare(b.name)));
   }
 
+  async function handleStoreIconChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (!store?.id || !isGerant) {
+      notify('Seul un gérant peut modifier l’icône de la boutique.');
+      return;
+    }
+    if (!offline.online) {
+      notify('Une connexion est nécessaire pour enregistrer l’icône de la boutique.');
+      return;
+    }
+
+    setSavingStoreIcon(true);
+    try {
+      const processed = await makeStoreIcon(file);
+      const iconUrl = await uploadStoreIcon(processed.blob, store.id);
+      await updateStore(store.id, { icon_url: iconUrl });
+      let cacheUnavailable = false;
+      try {
+        cacheStoreIcon(store.id, processed.dataUrl);
+      } catch {
+        cacheUnavailable = true;
+      }
+      setStoreIconUrl(processed.dataUrl);
+      setStore((current) => current ? { ...current, icon_url: iconUrl } : current);
+      notify(cacheUnavailable
+        ? 'Icône mise à jour, mais le cache hors ligne est indisponible sur cet appareil.'
+        : 'Icône de la boutique mise à jour.');
+    } catch (e) {
+      notify(userMessage(e));
+    } finally {
+      setSavingStoreIcon(false);
+    }
+  }
+
   async function handleProductSubmit(value: ProductFormValue, imageFile: File | null) {
     const canWrite = offline.online && isSupabaseConfigured;
     try {
       if (editingProduct) {
-        let imageUrl = value.image_url;
         const previousImageUrl = editingProduct.image_url;
-        if (imageFile) {
-          if (!canWrite) return { ok: false, error: 'La modification de la photo nécessite une connexion.' };
-          const url = await uploadProductImage(imageFile, editingProduct.id);
-          if (url) imageUrl = url;
-        }
+        if (imageFile && !canWrite) return { ok: false, error: 'La modification de la photo nécessite une connexion.' };
         const input: ProductInput = {
           id: editingProduct.id,
           name: value.name,
           category_id: value.category_id ?? editingProduct.category_id,
-          image_url: imageUrl,
+          image_url: imageFile ? previousImageUrl : value.image_url,
           stock_qty: value.stock_qty,
           low_stock_threshold: editingProduct.low_stock_threshold,
           price_gros: value.price_gros,
@@ -690,16 +742,44 @@ export default function App() {
           }
           return { ok: false, error: userMessage(res.error) };
         }
+        let photoWarning = false;
+        let savedImageUrl: string | null = null;
+        if (imageFile) {
+          try {
+            const imageUrl = await uploadProductImage(imageFile, editingProduct.id);
+            if (!imageUrl) {
+              photoWarning = true;
+            } else {
+              const photo = await saveProduct(
+                'update',
+                { ...input, image_url: imageUrl, idempotency_key: null },
+                identity.actor,
+              );
+              if (!photo.ok) {
+                photoWarning = true;
+                await deleteProductImage(imageUrl);
+              } else savedImageUrl = imageUrl;
+            }
+          } catch {
+            photoWarning = true;
+          }
+        }
         // Remplacement de photo : on efface l'ancienne du stockage pour éviter
         // un fichier orphelin (sauf si un autre produit la partage encore).
-        if (imageFile && previousImageUrl && previousImageUrl !== imageUrl) {
-          const shared = products.some((p) => p.id !== editingProduct.id && p.image_url === previousImageUrl);
+        const previousImagePath = productImagePathFromUrl(previousImageUrl);
+        const savedImagePath = productImagePathFromUrl(savedImageUrl);
+        if (imageFile && !photoWarning && previousImagePath && previousImagePath !== savedImagePath) {
+          const shared = products.some((p) =>
+            p.id !== editingProduct.id && productImagePathFromUrl(p.image_url) === previousImagePath
+          );
           if (!shared) {
             try { await deleteProductImage(previousImageUrl); } catch { /* la photo reste, sans bloquer */ }
           }
         }
         await loadAll();
-        notify('Produit enregistré.');
+        notify(photoWarning
+          ? 'Produit enregistré, mais la photo n’a pas pu être envoyée.'
+          : 'Produit enregistré.');
         return { ok: true };
       }
 
@@ -856,6 +936,32 @@ export default function App() {
             </button>
           </div>
           <div className="flex items-center gap-2">
+            {isGerant && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => storeIconInput.current?.click()}
+                  disabled={savingStoreIcon}
+                  className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-cyan-200/30 bg-slate-950/85 text-white shadow-[0_0_16px_rgba(34,211,238,0.2)] backdrop-blur-md transition hover:border-cyan-200/70 hover:shadow-[0_0_22px_rgba(34,211,238,0.35)] disabled:opacity-60"
+                  aria-label="Personnaliser l’icône de la boutique"
+                  title="Personnaliser l’icône de la boutique"
+                >
+                  {storeIconUrl
+                    ? <img src={storeIconUrl} alt="" className="h-8 w-8 rounded-full object-cover" />
+                    : <StoreIcon size={20} className="text-cyan-100" />}
+                  <span className="absolute -bottom-0.5 -right-0.5 flex h-5 w-5 items-center justify-center rounded-full border border-cyan-100/40 bg-slate-800 text-cyan-100 shadow">
+                    <Pencil size={11} />
+                  </span>
+                </button>
+                <input
+                  ref={storeIconInput}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleStoreIconChange}
+                />
+              </>
+            )}
             <SupabaseStatus compact />
           </div>
         </div>

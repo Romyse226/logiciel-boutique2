@@ -57,6 +57,7 @@ export interface AuthenticatedEmployee {
   name: string;
   phone: string | null;
   is_owner: boolean;
+  is_co_owner: boolean;
   status: EmployeeStatus;
   suspended_by: string | null;
   can_edit_catalog: boolean;
@@ -72,6 +73,7 @@ export interface InviteResult {
   name?: string;
   token?: string;
   is_owner?: boolean;
+  is_co_owner?: boolean;
   status?: EmployeeStatus;
   /** Nom du boss qui a suspendu l'accès (renvoyé par employee_state). */
   suspended_by?: string | null;
@@ -297,10 +299,11 @@ interface EmployeeRow {
   role: string | null;
   is_active: boolean;
   can_edit_catalog: boolean;
+  is_co_owner?: boolean;
   created_at: string;
 }
 
-const EMPLOYEE_COLUMNS = 'id, name, phone, role, is_active, can_edit_catalog, created_at';
+const EMPLOYEE_COLUMNS = 'id, name, phone, role, is_active, can_edit_catalog, is_co_owner, created_at';
 
 function newInviteToken(): string {
   const bytes = new Uint8Array(24);
@@ -323,6 +326,7 @@ function decodeEmployeeRow(row: EmployeeRow): Employee {
     status: encoded ? (parts[1] as EmployeeStatus) : row.is_active ? 'active' : 'suspended',
     can_edit_catalog: !!row.can_edit_catalog,
     can_add_products: encoded && parts[2] === '1',
+    is_co_owner: !!row.is_co_owner,
     access_token: encoded ? parts.slice(3).join('.') : row.id,
     created_at: row.created_at,
   };
@@ -482,7 +486,7 @@ export async function listEmployees(actor: Actor): Promise<{ ok: boolean; employ
 
 export async function createEmployee(
   actor: Actor,
-  input: { name: string; phone: string | null; canEditCatalog: boolean; canAddProducts: boolean },
+  input: { name: string; phone: string | null; canEditCatalog: boolean; canAddProducts: boolean; isCoOwner: boolean },
 ): Promise<{ ok: boolean; employee?: Employee; error?: string }> {
   if (!supabase) return { ok: false, error: 'Supabase non configuré' };
   if (actor.id) {
@@ -493,6 +497,7 @@ export async function createEmployee(
       p_phone: input.phone,
       p_can_edit: input.canEditCatalog,
       p_can_add: input.canAddProducts,
+      p_is_co_owner: input.isCoOwner,
     });
     if (!error) return data as unknown as { ok: boolean; employee?: Employee; error?: string };
     return { ok: false, error: isMissingRpc(error) ? 'La base doit être mise à jour avant de gérer les employés.' : error.message };
@@ -503,7 +508,7 @@ export async function createEmployee(
 export async function updateEmployee(
   actor: Actor,
   employeeId: string,
-  patch: { status?: EmployeeStatus; canEditCatalog?: boolean; canAddProducts?: boolean },
+  patch: { status?: EmployeeStatus; canEditCatalog?: boolean; canAddProducts?: boolean; isCoOwner?: boolean },
 ): Promise<{ ok: boolean; employee?: Employee; error?: string }> {
   if (!supabase) return { ok: false, error: 'Supabase non configuré' };
   if (actor.id) {
@@ -512,10 +517,23 @@ export async function updateEmployee(
       p_actor_token: actor.token,
       p_employee_id: employeeId,
       p_status: patch.status ?? null,
-      p_can_edit: patch.canEditCatalog ?? null,
-      p_can_add: patch.canAddProducts ?? null,
+      p_can_edit: typeof patch.canEditCatalog === 'boolean' ? patch.canEditCatalog : null,
+      p_can_add: typeof patch.canAddProducts === 'boolean' ? patch.canAddProducts : null,
+      p_is_co_owner: typeof patch.isCoOwner === 'boolean' ? patch.isCoOwner : null,
     });
-    if (!error) return data as unknown as { ok: boolean; employee?: Employee; error?: string };
+    if (!error) {
+      const result = data as { ok?: unknown; employee?: Employee; error?: unknown } | null;
+      if (result?.ok !== true) {
+        return {
+          ok: false,
+          error: typeof result?.error === 'string' ? result.error : 'La modification a été refusée par le serveur.',
+        };
+      }
+      if (!result.employee || typeof result.employee.id !== 'string') {
+        return { ok: false, error: 'Le serveur n’a pas renvoyé les données de l’employé modifié.' };
+      }
+      return { ok: true, employee: result.employee };
+    }
     return { ok: false, error: isMissingRpc(error) ? 'La base doit être mise à jour avant de gérer les employés.' : error.message };
   }
   return { ok: false, error: 'Session gérant requise.' };
@@ -569,10 +587,21 @@ export async function fetchStore(): Promise<StoreInfo | null> {
   return (data as unknown as StoreInfo) ?? null;
 }
 
-export async function updateStore(id: string, patch: Partial<Pick<StoreInfo, 'name' | 'phone' | 'address'>>): Promise<void> {
+export async function updateStore(id: string, patch: Partial<Pick<StoreInfo, 'name' | 'phone' | 'address' | 'icon_url'>>): Promise<void> {
   if (!supabase) return;
   const { error } = await supabase.from('stores').update(patch).eq('id', id);
   if (error) throw error;
+}
+
+export async function uploadStoreIcon(blob: Blob, storeId: string): Promise<string> {
+  if (!supabase) throw new Error('Supabase non configuré');
+  const path = `${storeId}/icon.jpg`;
+  const { error } = await supabase.storage
+    .from('store-icons')
+    .upload(path, blob, { cacheControl: '3600', upsert: true, contentType: 'image/jpeg' });
+  if (error) throw error;
+  const { data } = supabase.storage.from('store-icons').getPublicUrl(path);
+  return `${data.publicUrl}?v=${Date.now()}`;
 }
 
 // ---------- Sales ----------
@@ -834,13 +863,13 @@ export async function uploadProductImage(
       );
     });
 
-    const path = `products/${productId}-${Date.now()}.jpg`;
+    const path = `products/${productId}/${file.name}`;
 
     const { error } = await supabase.storage
       .from('product-images')
       .upload(path, blob, {
         cacheControl: '3600',
-        upsert: false,
+        upsert: true,
         contentType: 'image/jpeg',
       });
 
@@ -850,7 +879,7 @@ export async function uploadProductImage(
       .from('product-images')
       .getPublicUrl(path);
 
-    return data.publicUrl ?? null;
+    return data.publicUrl ? `${data.publicUrl}?v=${Date.now()}` : null;
   } finally {
     image.close();
   }

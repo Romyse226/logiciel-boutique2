@@ -5,9 +5,10 @@ import { userMessage } from '@/lib/errors';
 import { classNames, normalizeCIphone } from '@/lib/format';
 import { usePullToRefresh, PullToRefreshBar } from '@/lib/usePullToRefresh';
 import { SkeletonRow } from '@/components/Skeleton';
+import type { LucideIcon } from 'lucide-react';
 import {
   ChevronLeft, Plus, X, Loader2, MessageCircle, Check,
-  ShieldCheck, ShieldOff, Ban, RotateCcw, Phone, UserPlus,
+  ShieldCheck, ShieldOff, Ban, RotateCcw, Phone, UserPlus, Crown,
 } from 'lucide-react';
 
 const STATUS_META: Record<EmployeeStatus, { label: string; className: string }> = {
@@ -45,6 +46,7 @@ export function EmployeesPage({ actor, onBack, onNotify }: Props) {
   const [phone, setPhone] = useState('');
   const [canEdit, setCanEdit] = useState(false);
   const [canAdd, setCanAdd] = useState(false);
+  const [isCoOwner, setIsCoOwner] = useState(false);
   const [creating, setCreating] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
   const [justCreated, setJustCreated] = useState<Employee | null>(null);
@@ -67,12 +69,34 @@ export function EmployeesPage({ actor, onBack, onNotify }: Props) {
   // Actualisation par glissement du haut vers le bas (plus de bouton « Actualiser »).
   const pull = usePullToRefresh(load);
 
-  async function patch(id: string, changes: { status?: EmployeeStatus; canEditCatalog?: boolean; canAddProducts?: boolean }) {
+  async function patch(id: string, changes: { status?: EmployeeStatus; canEditCatalog?: boolean; canAddProducts?: boolean; isCoOwner?: boolean }) {
+    const previous = employees.find((employee) => employee.id === id);
+    if (!previous) return;
+    const optimistic: Partial<Employee> = {};
+    if (changes.status !== undefined) optimistic.status = changes.status;
+    if (changes.canEditCatalog !== undefined) optimistic.can_edit_catalog = changes.canEditCatalog;
+    if (changes.canAddProducts !== undefined) optimistic.can_add_products = changes.canAddProducts;
+    if (changes.isCoOwner !== undefined) optimistic.is_co_owner = changes.isCoOwner;
+    setEmployees((current) => current.map((employee) => employee.id === id ? { ...employee, ...optimistic } : employee));
     setBusyId(id);
-    const res = await updateEmployee(actor, id, changes);
-    setBusyId(null);
-    if (!res.ok) { onNotify(userMessage(res.error)); return; }
-    setEmployees((prev) => prev.map((e) => (e.id === id && res.employee ? res.employee : e)));
+    try {
+      const res = await updateEmployee(actor, id, changes);
+      if (!res.ok) {
+        setEmployees((current) => current.map((employee) => employee.id === id ? previous : employee));
+        onNotify(userMessage(res.error));
+        return;
+      }
+      if (res.employee) {
+        setEmployees((current) => current.map((employee) => employee.id === id
+          ? { ...employee, ...res.employee }
+          : employee));
+      }
+    } catch (e) {
+      setEmployees((current) => current.map((employee) => employee.id === id ? previous : employee));
+      onNotify(userMessage(e));
+    } finally {
+      setBusyId(null);
+    }
   }
 
   async function reinvite(id: string) {
@@ -93,6 +117,7 @@ export function EmployeesPage({ actor, onBack, onNotify }: Props) {
       phone: phone.trim() || null,
       canEditCatalog: canEdit,
       canAddProducts: canAdd,
+      isCoOwner,
     });
     setCreating(false);
     if (!res.ok || !res.employee) { setAddError(userMessage(res.error)); return; }
@@ -103,7 +128,7 @@ export function EmployeesPage({ actor, onBack, onNotify }: Props) {
   function closeAdd() {
     setAddOpen(false);
     setJustCreated(null);
-    setName(''); setPhone(''); setCanEdit(false); setCanAdd(false); setAddError(null);
+    setName(''); setPhone(''); setCanEdit(false); setCanAdd(false); setIsCoOwner(false); setAddError(null);
   }
 
   return (
@@ -180,6 +205,14 @@ export function EmployeesPage({ actor, onBack, onNotify }: Props) {
                     label="Autoriser à ajouter de nouveaux produits"
                     icon={ShieldCheck}
                     color="text-orange-600"
+                  />
+                  <Toggle
+                    checked={e.is_co_owner}
+                    disabled={busy}
+                    onChange={(v) => patch(e.id, { isCoOwner: v })}
+                    label="Autoriser Espace Boss"
+                    icon={Crown}
+                    color="text-violet-600"
                   />
                 </div>
 
@@ -287,6 +320,7 @@ export function EmployeesPage({ actor, onBack, onNotify }: Props) {
                   <div className="space-y-2">
                     <Toggle checked={canEdit} onChange={setCanEdit} label="Autoriser à modifier les informations du stock" icon={ShieldCheck} color="text-blue-600" />
                     <Toggle checked={canAdd} onChange={setCanAdd} label="Autoriser à ajouter de nouveaux produits" icon={ShieldCheck} color="text-orange-600" />
+                    <Toggle checked={isCoOwner} onChange={setIsCoOwner} label="Autoriser Espace Boss" icon={Crown} color="text-violet-600" />
                   </div>
                   {addError && <p className="rounded-xl bg-red-50 p-3 text-sm font-semibold text-red-700 ring-1 ring-red-200">{addError}</p>}
                 </div>
@@ -311,7 +345,7 @@ export function EmployeesPage({ actor, onBack, onNotify }: Props) {
 
 function Toggle({ checked, onChange, label, disabled, icon: Icon, color }: {
   checked: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean;
-  icon: typeof ShieldCheck; color: string;
+  icon: LucideIcon; color: string;
 }) {
   if (disabled) {
     return (

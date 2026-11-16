@@ -29,6 +29,7 @@ function emptyProfile(): UserProfile {
     employeeId: null,
     accessToken: '',
     isOwner: false,
+    isCoOwner: false,
     deviceToken: '',
     onboarded: false,
     phone: null,
@@ -46,8 +47,9 @@ interface UserContextValue {
   legacyEmployee: LegacyEmployeeIdentity | null;
   markIdentityReady: () => void;
   applyOwner: (identity: IdentityInput) => void;
+  applyCoOwner: (identity: IdentityInput) => void;
   applyEmployee: (identity: IdentityInput & { canEditCatalog: boolean; canAddProducts: boolean }) => void;
-  applyRemoteState: (state: { name?: string; canEditCatalog?: boolean; canAddProducts?: boolean }) => void;
+  applyRemoteState: (state: { name?: string; canEditCatalog?: boolean; canAddProducts?: boolean; isCoOwner?: boolean }) => void;
   clearIdentity: () => void;
   clearLegacyIdentity: () => void;
   isGerant: boolean;
@@ -73,6 +75,20 @@ export function UserProvider({ children }: { children: ReactNode }) {
       canAddProducts: true,
       employeeId: identity.employeeId,
       isOwner: true,
+      isCoOwner: false,
+      onboarded: true,
+    });
+  }, []);
+
+  const applyCoOwner = useCallback((identity: IdentityInput) => {
+    setProfile({
+      ...emptyProfile(),
+      role: 'gerant',
+      name: identity.name || 'Co-gérant',
+      canEditCatalog: true,
+      canAddProducts: true,
+      employeeId: identity.employeeId,
+      isCoOwner: true,
       onboarded: true,
     });
   }, []);
@@ -89,13 +105,18 @@ export function UserProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const applyRemoteState = useCallback((state: { name?: string; canEditCatalog?: boolean; canAddProducts?: boolean }) => {
-    setProfile((current) => ({
-      ...current,
-      name: state.name ?? current.name,
-      canEditCatalog: state.canEditCatalog ?? current.canEditCatalog,
-      canAddProducts: state.canAddProducts ?? current.canAddProducts,
-    }));
+  const applyRemoteState = useCallback((state: { name?: string; canEditCatalog?: boolean; canAddProducts?: boolean; isCoOwner?: boolean }) => {
+    setProfile((current) => {
+      const isCoOwner = state.isCoOwner ?? current.isCoOwner;
+      return {
+        ...current,
+        role: current.isOwner || isCoOwner ? 'gerant' : 'employe',
+        isCoOwner,
+        name: state.name ?? current.name,
+        canEditCatalog: isCoOwner ? true : state.canEditCatalog ?? current.canEditCatalog,
+        canAddProducts: isCoOwner ? true : state.canAddProducts ?? current.canAddProducts,
+      };
+    });
   }, []);
 
   const clearIdentity = useCallback(() => {
@@ -118,15 +139,16 @@ export function UserProvider({ children }: { children: ReactNode }) {
     legacyEmployee,
     markIdentityReady,
     applyOwner,
+    applyCoOwner,
     applyEmployee,
     applyRemoteState,
     clearIdentity,
     clearLegacyIdentity,
-    isGerant: profile.role === 'gerant' && profile.isOwner,
+    isGerant: profile.role === 'gerant',
     canEditCatalog: profile.role === 'gerant' || profile.canEditCatalog,
     canAddProducts: profile.role === 'gerant' || profile.canAddProducts,
   }), [
-    profile, identityReady, legacyEmployee, markIdentityReady, applyOwner,
+    profile, identityReady, legacyEmployee, markIdentityReady, applyOwner, applyCoOwner,
     applyEmployee, applyRemoteState, clearIdentity, clearLegacyIdentity,
   ]);
 

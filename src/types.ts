@@ -17,6 +17,8 @@ export interface UserProfile {
   accessToken: string;
   /** true si cet appareil est celui du boss. */
   isOwner: boolean;
+  /** true si cet employé est co-gérant de la boutique. */
+  isCoOwner: boolean;
   /** Jeton d'appareil, utilisé pour réclamer la propriété au premier lancement. */
   deviceToken: string;
   /** true quand le boss a renseigné son nom et son téléphone (page d'accueil). */
@@ -34,6 +36,7 @@ export interface Employee {
   status: EmployeeStatus;
   can_edit_catalog: boolean;
   can_add_products: boolean;
+  is_co_owner: boolean;
   access_token: string;
   /** Nom du boss qui a suspendu l'accès (renseigné par le serveur). */
   suspended_by?: string | null;
@@ -165,6 +168,7 @@ export interface StoreInfo {
   name: string;
   phone: string | null;
   address: string | null;
+  icon_url?: string | null;
   is_demo: boolean;
 }
 
