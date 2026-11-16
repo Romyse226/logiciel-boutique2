@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Home, ShoppingCart, History, Crown, Plus, Store as StoreIcon,
-  Check, ArrowRight, Delete, LogOut,
+  Check, ArrowRight, LogOut,
 } from 'lucide-react';
 import { classNames, formatFCFA, vibrate } from '@/lib/format';
 import { getHostContext, slugFromName, storeUrl, usesPathRouting } from '@/lib/tenant';
@@ -389,12 +389,29 @@ export default function App() {
 
   async function handleOwnerLogin(phone: string, pin: string): Promise<string | null> {
     const host = getHostContext();
-    if (!host.slug) return 'Ouvre la page de connexion depuis le sous-domaine de ta boutique.';
+
+    // Sur un sous-domaine ou un path /store/<slug>, on garde la vérification.
+    // Sur le domaine racine avec path-routing, le backend retrouve la boutique
+    // à partir du téléphone : plus besoin de slug en amont.
+    const needsSlug = !host.root || !usesPathRouting();
+    if (needsSlug && !host.slug) {
+      return 'Ouvre la page de connexion depuis le sous-domaine de ta boutique.';
+    }
+
     const result = await authPortal({ action: 'login', phone, pin });
     if (!result.ok) return result.error ?? 'Numéro ou PIN incorrect.';
     try {
       await applyPortalSession(result);
       setAuthError(null);
+
+      // Redirection path-routing : si on est sur / et que le backend nous a
+      // renvoyé un slug, on bascule sur /store/<slug>.
+      const employee = await getAuthenticatedEmployee();
+      if (employee && usesPathRouting() && host.root && employee.store_slug) {
+        const query = window.location.search;
+        const hash = window.location.hash;
+        window.history.replaceState({}, '', `/store/${employee.store_slug}${query}${hash}`);
+      }
       return null;
     } catch (error) {
       return userMessage(error);
@@ -1070,47 +1087,6 @@ function HomeSkeleton() {
   );
 }
 
-/** Pavé numérique de saisie d'un code secret (style déverrouillage de téléphone). */
-function PinPad({ onDigit, onBackspace, disabled = false }: {
-  onDigit: (d: string) => void;
-  onBackspace: () => void;
-  disabled?: boolean;
-}) {
-  const key = 'h-16 rounded-2xl bg-slate-50 text-2xl font-extrabold text-slate-800 ring-1 ring-slate-200 transition active:scale-95 active:bg-orange-100 disabled:opacity-50';
-  return (
-    <div className="grid grid-cols-3 gap-3">
-      {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((d) => (
-        <button key={d} type="button" disabled={disabled}
-          onClick={() => { vibrate(10); onDigit(d); }} className={key}>
-          {d}
-        </button>
-      ))}
-      <button type="button" disabled={disabled} aria-label="Effacer un chiffre"
-        onClick={() => { vibrate(10); onBackspace(); }}
-        className="flex h-16 items-center justify-center rounded-2xl bg-slate-50 text-slate-500 ring-1 ring-slate-200 transition active:scale-95 active:bg-orange-100 disabled:opacity-50">
-        <Delete size={24} />
-      </button>
-      <button type="button" disabled={disabled}
-        onClick={() => { vibrate(10); onDigit('0'); }} className={key}>
-        0
-      </button>
-      <span aria-hidden />
-    </div>
-  );
-}
-
-/** Points affichant le nombre de chiffres saisis (le code reste masqué). */
-function PinDots({ count }: { count: number }) {
-  const shown = Math.max(6, count);
-  return (
-    <div className="flex items-center justify-center gap-2.5 py-1" role="status" aria-label={`${count} chiffre(s) saisi(s)`}>
-      {Array.from({ length: shown }).map((_, i) => (
-        <span key={i} className={classNames('h-3.5 w-3.5 rounded-full transition', i < count ? 'bg-orange-500' : 'bg-slate-200')} />
-      ))}
-    </div>
-  );
-}
-
 function AuthPage({
   host, initialError, onLogin, onSignup, onVerifyRecovery, onCompleteRecovery,
 }: {
@@ -1133,18 +1109,50 @@ function AuthPage({
   const [error, setError] = useState<string | null>(initialError);
   const [busy, setBusy] = useState(false);
 
-  async function submitLogin() {
-    if (busy || pin.length !== 4) return;
-    if (host.root && usesPathRouting() && !slug) {
-      setError('Renseigne le nom de ta boutique pour retrouver son adresse.');
+  const ADMIN_WHATSAPP = '2250757094873';
+
+  // Restauration après retour de WhatsApp
+  useEffect(() => {
+    const saved = sessionStorage.getItem('recovery_flow');
+    if (!saved) return;
+    try {
+      const data = JSON.parse(saved) as { step?: Step; phone?: string; storeName?: string };
+      if (data.phone) setPhone(data.phone);
+      if (data.storeName) setStoreName(data.storeName);
+      if (data.step === 'verify') setStep('verify');
+    } catch { /* ignore */ }
+  }, []);
+
+  const handleWhatsAppRecovery = () => {
+    if (!phone.trim()) {
+      setError('Renseigne ton numéro de téléphone.');
       return;
     }
+    const boutique = storeName.trim() || slugFromName(phone) || 'ma boutique';
+    const message =
+      `Bonjour WhaChap, je souhaite réinitialiser mon PIN.\n\n` +
+      `Boutique : ${boutique}\n` +
+      `Téléphone : ${phone}`;
+    const url = `https://wa.me/${ADMIN_WHATSAPP}?text=${encodeURIComponent(message)}`;
+
+    sessionStorage.setItem('recovery_flow', JSON.stringify({
+      step: 'verify',
+      phone,
+      storeName,
+    }));
+
+    // Ouvre WhatsApp puis bascule l'UI sur la saisie du code
+    window.open(url, '_blank', 'noopener,noreferrer');
+    setStep('verify');
+    setError(null);
+  };
+
+  async function submitLogin() {
+    if (busy || pin.length !== 4) return;
+    // Plus de vérification de slug ici : le backend gère le path-routing.
     setBusy(true);
     setError(null);
     try {
-      if (host.root && usesPathRouting() && slug) {
-        window.history.replaceState({}, '', `/store/${slug}`);
-      }
       const message = await onLogin(phone, pin);
       if (message) {
         setError(message);
@@ -1242,14 +1250,7 @@ function AuthPage({
 
         {step === 'login' && (
           <>
-            {host.root && usesPathRouting() && (
-              <label className="mt-6 block">
-                <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Nom de ta boutique</span>
-                <input value={storeName} onChange={(event) => { setStoreName(event.target.value); setSlug(slugFromName(event.target.value)); }} autoComplete="organization" placeholder="Ex. : Boutique du Centre" className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm outline-none focus:border-orange-400" />
-                {slug && <span className="mt-1 block text-xs text-slate-400">Adresse : /store/{slug}</span>}
-              </label>
-            )}
-            <label className="mt-4 block">
+            <label className="mt-6 block">
               <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Numéro de téléphone</span>
               <input
                 value={phone}
@@ -1281,14 +1282,7 @@ function AuthPage({
             >
               <Check size={20} /> {busy ? 'Connexion…' : 'Se connecter'}
             </button>
-            <button type="button" onClick={() => {
-              if (host.root && usesPathRouting()) {
-                if (!slug) { setError('Renseigne le nom de ta boutique pour retrouver son adresse.'); return; }
-                window.history.replaceState({}, '', `/store/${slug}`);
-              }
-              setStep('forgot');
-              setError(null);
-            }} className="mt-3 w-full text-center text-sm font-semibold text-slate-500">
+            <button type="button" onClick={() => { setStep('forgot'); setError(null); }} className="mt-3 w-full text-center text-sm font-semibold text-slate-500">
               PIN oublié ?
             </button>
             {host.root && usesPathRouting() && (
@@ -1350,33 +1344,81 @@ function AuthPage({
                 className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm outline-none focus:border-orange-400"
               />
             </label>
-            <button type="button" onClick={() => { if (!phone.trim()) { setError('Renseigne ton numéro de téléphone.'); return; } setStep('verify'); setError(null); }} disabled={!phone.trim()} className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 px-4 py-3.5 text-base font-bold text-white shadow disabled:opacity-60">
-              <ArrowRight size={20} /> J’ai reçu un code
+            <label className="mt-3 block">
+              <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Nom de la boutique</span>
+              <input
+                value={storeName}
+                onChange={(event) => setStoreName(event.target.value)}
+                placeholder="Ex. : Boutique du Centre"
+                className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm outline-none focus:border-orange-400"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={handleWhatsAppRecovery}
+              disabled={!phone.trim()}
+              className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 px-4 py-3.5 text-base font-bold text-white shadow disabled:opacity-60"
+            >
+              <ArrowRight size={20} /> Demander un code par WhatsApp
             </button>
-            <button type="button" onClick={() => { setStep('login'); setError(null); }} className="mt-3 w-full text-center text-sm font-semibold text-slate-500">Retour à la connexion</button>
+            <p className="mt-2 text-center text-[11px] text-slate-400">
+              WhatsApp s'ouvre avec un message prérempli. Le gérant te renvoie un code à saisir ici.
+            </p>
+            <button type="button" onClick={() => { setStep('login'); setError(null); }} className="mt-3 w-full text-center text-sm font-semibold text-slate-500">
+              Retour à la connexion
+            </button>
           </>
         )}
 
         {step === 'verify' && (
           <>
-            <p className="mb-1 mt-6 block text-xs font-bold uppercase tracking-wide text-slate-500">Code temporaire à 4 chiffres</p>
-            <PinDots count={recoveryCode.length} />
-            <div className="mt-3">
-              <PinPad disabled={busy} onDigit={(digit) => setRecoveryCode((value) => (value + digit).slice(0, 4))} onBackspace={() => setRecoveryCode((value) => value.slice(0, -1))} />
-            </div>
-            <button type="button" onClick={verifyCode} disabled={busy || recoveryCode.length !== 4} className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 px-4 py-3.5 text-base font-bold text-white shadow disabled:opacity-60">
+            <label className="mt-6 block">
+              <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Code temporaire à 4 chiffres</span>
+              <input
+                value={recoveryCode}
+                onChange={(event) => setRecoveryCode(event.target.value.replace(/\D/g, '').slice(0, 4))}
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={4}
+                placeholder="••••"
+                className="w-full rounded-xl border border-slate-200 px-3 py-3 text-center text-xl tracking-[0.5em] outline-none focus:border-orange-400"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={verifyCode}
+              disabled={busy || recoveryCode.length !== 4}
+              className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 px-4 py-3.5 text-base font-bold text-white shadow disabled:opacity-60"
+            >
               <Check size={20} /> {busy ? 'Vérification…' : 'Vérifier le code'}
+            </button>
+            <button type="button" onClick={() => { sessionStorage.removeItem('recovery_flow'); setStep('forgot'); setRecoveryCode(''); setError(null); }} className="mt-3 w-full text-center text-sm font-semibold text-slate-500">
+              Redemander un code
             </button>
           </>
         )}
 
         {step === 'new-pin' && (
           <>
-            <PinDots count={pin.length} />
-            <div className="mt-3">
-              <PinPad disabled={busy} onDigit={(digit) => setPin((value) => (value + digit).slice(0, 4))} onBackspace={() => setPin((value) => value.slice(0, -1))} />
-            </div>
-            <button type="button" onClick={completeRecovery} disabled={busy || pin.length !== 4} className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 px-4 py-3.5 text-base font-bold text-white shadow disabled:opacity-60">
+            <label className="mt-6 block">
+              <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Nouveau PIN (4 chiffres)</span>
+              <input
+                value={pin}
+                onChange={(event) => setPin(event.target.value.replace(/\D/g, '').slice(0, 4))}
+                inputMode="numeric"
+                type="password"
+                autoComplete="new-password"
+                maxLength={4}
+                placeholder="••••"
+                className="w-full rounded-xl border border-slate-200 px-3 py-3 text-center text-xl tracking-[0.5em] outline-none focus:border-orange-400"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={completeRecovery}
+              disabled={busy || pin.length !== 4}
+              className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 px-4 py-3.5 text-base font-bold text-white shadow disabled:opacity-60"
+            >
               <Check size={20} /> {busy ? 'Modification…' : 'Enregistrer le nouveau PIN'}
             </button>
           </>
