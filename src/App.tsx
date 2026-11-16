@@ -247,6 +247,9 @@ export default function App() {
     markIdentityReady();
   }, [applyAuthenticatedEmployee, clearLegacyIdentity, markIdentityReady]);
 
+  // CORRIGÉ : on ne déconnecte PLUS sur un échec réseau de getAuthenticatedEmployee().
+  // La session Supabase reste valide ; un second useEffect (plus bas) rattrape
+  // le chargement du profil dès que le réseau revient / au focus / périodiquement.
   useEffect(() => {
     if (identityBootstrapStarted.current) return;
     identityBootstrapStarted.current = true;
@@ -273,8 +276,25 @@ export default function App() {
 
         const { data: sessionData, error: sessionError } = await supabase!.auth.getSession();
         if (sessionError) throw sessionError;
+
         if (sessionData.session) {
-          const employee = await getAuthenticatedEmployee();
+          // Session présente : on tente de charger le profil.
+          // - Succès -> app normale.
+          // - Échec réseau -> on GARDE la session, on laisse profile vide
+          //   (donc AccessCheckScreen) et le 2e useEffect réessaiera.
+          // - Profil introuvable (token valide mais compte supprimé) -> déconnexion.
+          let employee: Awaited<ReturnType<typeof getAuthenticatedEmployee>> = null;
+          let networkFailure = false;
+          try {
+            employee = await getAuthenticatedEmployee();
+          } catch (err) {
+            if (isNetworkError(err instanceof Error ? err.message : String(err))) {
+              networkFailure = true;
+            } else {
+              throw err;
+            }
+          }
+
           if (employee) {
             if (usesPathRouting() && host.root && employee.store_slug) {
               const query = window.location.search;
@@ -285,6 +305,14 @@ export default function App() {
             clearLegacyIdentity();
             return;
           }
+
+          if (networkFailure) {
+            // Session conservée, profil pas encore chargé : on ne fait rien,
+            // le 2e useEffect s'en occupe (retry au focus/réseau/interval).
+            return;
+          }
+
+          // Token valide mais aucun profil associé : vraie déconnexion.
           await signOutSupabase();
         }
 
@@ -309,6 +337,41 @@ export default function App() {
       }
     })();
   }, [applyPortalSession, clearLegacyIdentity, legacyEmployee, markIdentityReady, notify]);
+
+  // CORRIGÉ (nouveau) : rattrapage du profil tant qu'une session Supabase existe
+  // mais que profile.employeeId n'est pas encore chargé (échec réseau au boot,
+  // actualisation, retour de veille, retour du réseau…).
+  useEffect(() => {
+    if (profile.employeeId) return;
+    if (!isSupabaseConfigured || !supabase) return;
+
+    let cancelled = false;
+    const tryLoad = async () => {
+      if (cancelled) return;
+      try {
+        const { data } = await supabase.auth.getSession();
+        if (cancelled || !data.session) return;
+        const employee = await getAuthenticatedEmployee();
+        if (cancelled || !employee) return;
+        applyAuthenticatedEmployee(employee);
+      } catch {
+        /* réseau : on retentera */
+      }
+    };
+
+    void tryLoad();
+    const interval = window.setInterval(tryLoad, 5000);
+    const onOnline = () => { void tryLoad(); };
+    const onVisible = () => { if (document.visibilityState === 'visible') void tryLoad(); };
+    window.addEventListener('online', onOnline);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener('online', onOnline);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [profile.employeeId, applyAuthenticatedEmployee]);
 
   // Retrait d'accès : on revérifie à chaque reconnexion et au retour sur l'app,
   // pour que le blocage soit effectif même sans rechargement de la page.
@@ -1177,20 +1240,6 @@ function AuthPage({
         <h1 className="mt-4 text-center text-2xl font-extrabold text-slate-800">{titles[step]}</h1>
         <p className="mt-1 text-center text-sm text-slate-500">{subtitles[step]}</p>
 
-        {(step === 'login' || step === 'forgot') && (
-          <label className="mt-6 block">
-            <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Numéro de téléphone</span>
-            <input
-              value={phone}
-              onChange={(event) => setPhone(event.target.value)}
-              inputMode="tel"
-              autoComplete="tel"
-              placeholder="Ex. : 07 00 00 00 00"
-              className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm outline-none focus:border-orange-400"
-            />
-          </label>
-        )}
-
         {step === 'login' && (
           <>
             {host.root && usesPathRouting() && (
@@ -1200,11 +1249,30 @@ function AuthPage({
                 {slug && <span className="mt-1 block text-xs text-slate-400">Adresse : /store/{slug}</span>}
               </label>
             )}
-            <p className="mb-1 mt-4 block text-xs font-bold uppercase tracking-wide text-slate-500">PIN à 4 chiffres</p>
-            <PinDots count={pin.length} />
-            <div className="mt-3">
-              <PinPad disabled={busy} onDigit={(digit) => setPin((value) => (value + digit).slice(0, 4))} onBackspace={() => setPin((value) => value.slice(0, -1))} />
-            </div>
+            <label className="mt-4 block">
+              <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Numéro de téléphone</span>
+              <input
+                value={phone}
+                onChange={(event) => setPhone(event.target.value)}
+                inputMode="tel"
+                autoComplete="tel"
+                placeholder="Ex. : 07 00 00 00 00"
+                className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm outline-none focus:border-orange-400"
+              />
+            </label>
+            <label className="mt-3 block">
+              <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Code PIN (4 chiffres)</span>
+              <input
+                value={pin}
+                onChange={(event) => setPin(event.target.value.replace(/\D/g, '').slice(0, 4))}
+                inputMode="numeric"
+                type="password"
+                autoComplete="off"
+                maxLength={4}
+                placeholder="••••"
+                className="w-full rounded-xl border border-slate-200 px-3 py-3 text-center text-xl tracking-[0.5em] outline-none focus:border-orange-400"
+              />
+            </label>
             <button
               type="button"
               onClick={submitLogin}
@@ -1246,15 +1314,19 @@ function AuthPage({
               <input value={phone} onChange={(event) => setPhone(event.target.value)} inputMode="tel" autoComplete="tel" placeholder="Ex. : 07 00 00 00 00" className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm outline-none focus:border-orange-400" />
             </label>
             <label className="mt-3 block">
-              <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Adresse de la boutique</span>
-              <input value={slug} onChange={(event) => setSlug(slugFromName(event.target.value))} placeholder="boutique-du-centre" className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm outline-none focus:border-orange-400" />
+              <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Code PIN (4 chiffres)</span>
+              <input
+                value={pin}
+                onChange={(event) => setPin(event.target.value.replace(/\D/g, '').slice(0, 4))}
+                inputMode="numeric"
+                type="password"
+                autoComplete="off"
+                maxLength={4}
+                placeholder="••••"
+                className="w-full rounded-xl border border-slate-200 px-3 py-3 text-center text-xl tracking-[0.5em] outline-none focus:border-orange-400"
+              />
             </label>
-            <p className="mb-1 mt-4 block text-xs font-bold uppercase tracking-wide text-slate-500">Choisis un PIN à 4 chiffres</p>
-            <PinDots count={pin.length} />
-            <div className="mt-3">
-              <PinPad disabled={busy} onDigit={(digit) => setPin((value) => (value + digit).slice(0, 4))} onBackspace={() => setPin((value) => value.slice(0, -1))} />
-            </div>
-            <button type="button" onClick={submitSignup} disabled={busy || pin.length !== 4} className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 px-4 py-3.5 text-base font-bold text-white shadow disabled:opacity-60">
+            <button type="button" onClick={submitSignup} disabled={busy || pin.length !== 4 || !storeName.trim() || !ownerName.trim() || !phone.trim()} className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 px-4 py-3.5 text-base font-bold text-white shadow disabled:opacity-60">
               <Check size={20} /> {busy ? 'Création…' : 'Créer ma boutique'}
             </button>
             {host.root && usesPathRouting() && (
@@ -1267,6 +1339,17 @@ function AuthPage({
 
         {step === 'forgot' && (
           <>
+            <label className="mt-6 block">
+              <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Numéro de téléphone</span>
+              <input
+                value={phone}
+                onChange={(event) => setPhone(event.target.value)}
+                inputMode="tel"
+                autoComplete="tel"
+                placeholder="Ex. : 07 00 00 00 00"
+                className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm outline-none focus:border-orange-400"
+              />
+            </label>
             <button type="button" onClick={() => { if (!phone.trim()) { setError('Renseigne ton numéro de téléphone.'); return; } setStep('verify'); setError(null); }} disabled={!phone.trim()} className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 px-4 py-3.5 text-base font-bold text-white shadow disabled:opacity-60">
               <ArrowRight size={20} /> J’ai reçu un code
             </button>
