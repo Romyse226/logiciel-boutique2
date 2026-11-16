@@ -28,7 +28,7 @@ import {
   isSupabaseConfigured, pingSupabase, saveProduct, isProductArchived, employeeState,
   uploadProductImage, deleteProductImage, uploadStoreIcon, updateStore, authPortal, setAuthSession,
   getAuthenticatedEmployee, signOut as signOutSupabase, supabase, type Actor, type AuthPortalResult,
-  productImagePathFromUrl,
+  productImagePathFromUrl, productImagePublicUrl,
 } from '@/lib/supabase';
 import type { CartLine, Product, ProductCategory, ProductSaleUnit, StoreInfo, Sale, ProductInput } from '@/types';
 import { applyPwaStoreIcon, cacheStoreIcon, cachedStoreIcon, makeStoreIcon } from '@/lib/storeIcon';
@@ -43,6 +43,42 @@ const DEMO_STORE: StoreInfo = {
   address: '',
   is_demo: true,
 };
+
+interface OfflineSnapshot {
+  store: StoreInfo;
+  categories: ProductCategory[];
+  products: Product[];
+}
+
+function offlineSnapshotKey(employeeId: string): string {
+  return `quincaillerie.offlineSnapshot.${employeeId}`;
+}
+
+function readOfflineSnapshot(employeeId: string): OfflineSnapshot | null {
+  try {
+    const raw = localStorage.getItem(offlineSnapshotKey(employeeId));
+    if (!raw) return null;
+    const value = JSON.parse(raw) as Partial<OfflineSnapshot>;
+    if (!value.store || typeof value.store.id !== 'string'
+      || !Array.isArray(value.categories) || !Array.isArray(value.products)) return null;
+    return {
+      store: value.store,
+      categories: value.categories,
+      products: value.products,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeOfflineSnapshot(employeeId: string, snapshot: OfflineSnapshot): boolean {
+  try {
+    localStorage.setItem(offlineSnapshotKey(employeeId), JSON.stringify(snapshot));
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function newUuid(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
@@ -115,6 +151,7 @@ export default function App() {
   const { notify } = useToast();
 
   const [tab, setTab] = useState<Tab>('home');
+  const [productEditMode, setProductEditMode] = useState(false);
   const [bossScreen, setBossScreen] = useState<BossScreen>('dashboard');
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<ProductCategory[]>([]);
@@ -190,8 +227,23 @@ export default function App() {
   }, [storeIconUrl]);
 
   useEffect(() => {
-    if (profile.employeeId) loadAll();
+    if (!profile.employeeId) return;
+    const snapshot = readOfflineSnapshot(profile.employeeId);
+    if (snapshot) {
+      setStore(snapshot.store);
+      setCategories(snapshot.categories);
+      setProducts(snapshot.products);
+      setStoreIconUrl(cachedStoreIcon(snapshot.store.id) ?? snapshot.store.icon_url ?? null);
+    }
+    void loadAll();
   }, [profile.employeeId, loadAll]);
+
+  useEffect(() => {
+    if (!profile.employeeId || !store) return;
+    if (!writeOfflineSnapshot(profile.employeeId, { store, categories, products })) {
+      setLoadError('Cache hors ligne indisponible sur cet appareil. Gardez une connexion pour recharger le catalogue.');
+    }
+  }, [profile.employeeId, store, categories, products]);
 
   /** Tirer vers le bas : on renvoie d'abord les opérations en attente, puis on relit les données. */
   const refreshAll = useCallback(async () => {
@@ -335,6 +387,8 @@ export default function App() {
           await signOutSupabase();
         }
 
+        if (!sessionData.session && navigator.onLine) clearIdentity();
+
         if (legacyEmployee && host.slug) {
           const result = await authPortal({
             action: 'accept-invite',
@@ -355,7 +409,7 @@ export default function App() {
         markIdentityReady();
       }
     })();
-  }, [applyPortalSession, clearLegacyIdentity, legacyEmployee, markIdentityReady, notify]);
+  }, [applyPortalSession, clearIdentity, clearLegacyIdentity, legacyEmployee, markIdentityReady, notify]);
 
   // CORRIGÉ (nouveau) : rattrapage du profil tant qu'une session Supabase existe
   // mais que profile.employeeId n'est pas encore chargé (échec réseau au boot,
@@ -507,6 +561,7 @@ export default function App() {
 
   const go = useCallback((t: Tab) => {
     vibrate(15);
+    if (t !== 'sell') setProductEditMode(false);
     if (t === 'boss') setBossScreen('dashboard');
     setTab(t);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -743,13 +798,12 @@ export default function App() {
           return { ok: false, error: userMessage(res.error) };
         }
         let photoWarning = false;
+        let photoWarningDetail = '';
         let savedImageUrl: string | null = null;
         if (imageFile) {
           try {
             const imageUrl = await uploadProductImage(imageFile, editingProduct.id);
-            if (!imageUrl) {
-              photoWarning = true;
-            } else {
+            if (imageUrl) {
               const photo = await saveProduct(
                 'update',
                 { ...input, image_url: imageUrl, idempotency_key: null },
@@ -757,11 +811,16 @@ export default function App() {
               );
               if (!photo.ok) {
                 photoWarning = true;
+                photoWarningDetail = userMessage(photo.error);
                 await deleteProductImage(imageUrl);
               } else savedImageUrl = imageUrl;
+            } else {
+              photoWarning = true;
+              photoWarningDetail = 'Supabase Storage n’a pas renvoyé d’URL publique.';
             }
-          } catch {
+          } catch (e) {
             photoWarning = true;
+            photoWarningDetail = userMessage(e);
           }
         }
         // Remplacement de photo : on efface l'ancienne du stockage pour éviter
@@ -778,17 +837,21 @@ export default function App() {
         }
         await loadAll();
         notify(photoWarning
-          ? 'Produit enregistré, mais la photo n’a pas pu être envoyée.'
+          ? `Produit enregistré, mais la photo n’a pas pu être envoyée. ${photoWarningDetail}`
           : 'Produit enregistré.');
         return { ok: true };
       }
 
       const newId = newUuid();
+      if (!canWrite && imageFile) {
+        return { ok: false, error: 'L’ajout d’une photo nécessite une connexion.' };
+      }
+      const photoCacheVersion = Date.now();
       const input: ProductInput = {
         id: newId,
         name: value.name,
         category_id: value.category_id,
-        image_url: null,
+        image_url: imageFile ? productImagePublicUrl(imageFile, newId, photoCacheVersion) : null,
         stock_qty: value.stock_qty,
         low_stock_threshold: value.low_stock_threshold,
         price_gros: value.price_gros,
@@ -796,7 +859,6 @@ export default function App() {
         idempotency_key: `prod-new-${newId}`,
       };
       if (!canWrite) {
-        if (imageFile) return { ok: false, error: 'L’ajout d’une photo nécessite une connexion.' };
         offline.enqueue({ type: 'adjust_stock', payload: { mode: 'create', input, actor } });
         applyLocalProductCreate(input, newId);
         notify('Produit enregistré hors-ligne. Il sera envoyé au retour du réseau.');
@@ -817,19 +879,23 @@ export default function App() {
       // Photo : envoyée après la création. Son échec n'annule pas le produit,
       // mais l'utilisateur en est informé (pas de réussite trompeuse).
       let photoWarning = false;
+      let photoWarningDetail = '';
       if (imageFile) {
         const pid = res.product_id ?? newId;
         try {
-          const url = await uploadProductImage(imageFile, pid);
-          if (url) {
-            const photo = await saveProduct('update', { ...input, id: pid, image_url: url, idempotency_key: null }, identity.actor);
-            if (!photo.ok) photoWarning = true;
-          } else photoWarning = true;
-        } catch { photoWarning = true; }
+          const url = await uploadProductImage(imageFile, pid, photoCacheVersion);
+          if (!url) {
+            photoWarning = true;
+            photoWarningDetail = 'Supabase Storage n’a pas renvoyé d’URL publique.';
+          }
+        } catch (e) {
+          photoWarning = true;
+          photoWarningDetail = userMessage(e);
+        }
       }
       await loadAll();
       notify(photoWarning
-        ? 'Produit enregistré, mais la photo n’a pas pu être envoyée.'
+        ? `Produit enregistré, mais la photo n’a pas pu être envoyée. ${photoWarningDetail}`
         : 'Produit enregistré.');
       return { ok: true };
     } catch (e) {
@@ -925,10 +991,43 @@ export default function App() {
             <button type="button" onClick={() => setSignOutConfirmOpen(true)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-red-50 hover:text-red-600" aria-label="Se déconnecter" title="Se déconnecter">
               <LogOut size={18} />
             </button>
-            <button type="button" onClick={() => go('home')} className="flex min-w-0 items-center gap-2">
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-orange-400 to-orange-600 text-white shadow">
-                <StoreIcon size={20} />
-              </span>
+            <div className="relative h-9 w-9 shrink-0">
+              <button
+                type="button"
+                onClick={() => go('home')}
+                className={classNames(
+                  'flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl text-white shadow transition',
+                  productEditMode
+                    ? 'bg-slate-900 ring-1 ring-cyan-200/50'
+                    : 'bg-gradient-to-br from-pink-400 to-fuchsia-600',
+                )}
+                aria-label="Accueil"
+              >
+                {storeIconUrl
+                  ? <img src={storeIconUrl} alt="" className="h-full w-full object-cover" />
+                  : <StoreIcon size={20} />}
+              </button>
+              {isGerant && productEditMode && (
+                <button
+                  type="button"
+                  onClick={() => storeIconInput.current?.click()}
+                  disabled={savingStoreIcon}
+                  className="absolute -bottom-1 -right-1 z-10 flex h-5 w-5 items-center justify-center rounded-full border border-white bg-slate-800 text-white shadow-md disabled:opacity-60"
+                  aria-label="Changer l’icône de la boutique"
+                  title="Changer l’icône de la boutique"
+                >
+                  <Pencil size={11} />
+                </button>
+              )}
+              <input
+                ref={storeIconInput}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleStoreIconChange}
+              />
+            </div>
+            <button type="button" onClick={() => go('home')} className="min-w-0 text-left">
               <div className="min-w-0 text-left">
                 <h1 className="truncate text-base font-extrabold text-slate-800">{store?.name ?? 'Quincaillerie'}</h1>
                 <p className="truncate text-[11px] text-slate-500">Profil : {sellerName}</p>
@@ -936,32 +1035,6 @@ export default function App() {
             </button>
           </div>
           <div className="flex items-center gap-2">
-            {isGerant && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => storeIconInput.current?.click()}
-                  disabled={savingStoreIcon}
-                  className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-cyan-200/30 bg-slate-950/85 text-white shadow-[0_0_16px_rgba(34,211,238,0.2)] backdrop-blur-md transition hover:border-cyan-200/70 hover:shadow-[0_0_22px_rgba(34,211,238,0.35)] disabled:opacity-60"
-                  aria-label="Personnaliser l’icône de la boutique"
-                  title="Personnaliser l’icône de la boutique"
-                >
-                  {storeIconUrl
-                    ? <img src={storeIconUrl} alt="" className="h-8 w-8 rounded-full object-cover" />
-                    : <StoreIcon size={20} className="text-cyan-100" />}
-                  <span className="absolute -bottom-0.5 -right-0.5 flex h-5 w-5 items-center justify-center rounded-full border border-cyan-100/40 bg-slate-800 text-cyan-100 shadow">
-                    <Pencil size={11} />
-                  </span>
-                </button>
-                <input
-                  ref={storeIconInput}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={handleStoreIconChange}
-                />
-              </>
-            )}
             <SupabaseStatus compact />
           </div>
         </div>
@@ -1011,6 +1084,8 @@ export default function App() {
               onNotify={notify}
               onRefresh={refreshAll}
               onBack={() => go('home')}
+              editMode={productEditMode}
+              onEditModeChange={setProductEditMode}
             />
           )
         ) : tab === 'history' ? (

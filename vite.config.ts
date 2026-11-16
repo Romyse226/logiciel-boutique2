@@ -87,7 +87,7 @@ export default defineConfig({
           {
             // Toute image produit jamais affichée est conservée en cache local :
             // jamais retéléchargée, même après une coupure réseau.
-            urlPattern: /\/images\/products\//,
+            urlPattern: /\/(?:images\/products\/|storage\/v1\/object\/public\/product-images\/)/,
             handler: 'CacheFirst',
             options: {
               cacheName: PRODUCT_IMAGE_CACHE,

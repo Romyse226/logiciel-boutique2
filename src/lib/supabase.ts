@@ -231,12 +231,31 @@ export async function isProductArchived(productId: string): Promise<boolean> {
 }
 
 /** Vrai si l'erreur signifie que la fonction RPC n'existe pas sur le serveur. */
-function isMissingRpc(error: { code?: string; message?: string } | null): boolean {
+function isMissingRpc(error: { code?: string; message?: string; status?: number } | null): boolean {
   if (!error) return false;
   const code = error.code ?? '';
-  if (code === 'PGRST202' || code === '42883') return true;
+  if (code === 'PGRST202' || code === '42883' || error.status === 404) return true;
   return /could not find the function|function .* does not exist/i.test(error.message ?? '');
 }
+
+function employeeMutationResult(data: unknown): { ok: boolean; employee?: Employee; error?: string } {
+  const result = data as { ok?: unknown; employee?: Employee; error?: unknown } | null;
+  if (result?.ok !== true) {
+    return {
+      ok: false,
+      error: typeof result?.error === 'string' ? result.error : 'La création a été refusée par le serveur.',
+    };
+  }
+  if (!result.employee || typeof result.employee.id !== 'string') {
+    return { ok: false, error: 'Le serveur n’a pas renvoyé les données du nouvel employé.' };
+  }
+  return {
+    ok: true,
+    employee: { ...result.employee, is_co_owner: result.employee.is_co_owner === true },
+  };
+}
+
+const EMPLOYEE_MIGRATION_REQUIRED = 'La base doit être mise à jour avant de gérer les employés.';
 
 // ---------- Employees / permissions (vérifiées côté serveur) ----------
 
@@ -473,12 +492,19 @@ export async function listEmployees(actor: Actor): Promise<{ ok: boolean; employ
     });
     if (!error) {
       const res = data as unknown as { ok: boolean; employees: Employee[]; error?: string };
-      return { ok: res.ok, employees: res.employees ?? [], error: res.error };
+      return {
+        ok: res.ok,
+        employees: (res.employees ?? []).map((employee) => ({
+          ...employee,
+          is_co_owner: employee.is_co_owner === true,
+        })),
+        error: res.error,
+      };
     }
     return {
       ok: false,
       employees: [],
-      error: isMissingRpc(error) ? 'La base doit être mise à jour avant de gérer les employés.' : error.message,
+      error: isMissingRpc(error) ? EMPLOYEE_MIGRATION_REQUIRED : error.message,
     };
   }
   return { ok: false, employees: [], error: 'Session gérant requise.' };
@@ -499,8 +525,23 @@ export async function createEmployee(
       p_can_add: input.canAddProducts,
       p_is_co_owner: input.isCoOwner,
     });
-    if (!error) return data as unknown as { ok: boolean; employee?: Employee; error?: string };
-    return { ok: false, error: isMissingRpc(error) ? 'La base doit être mise à jour avant de gérer les employés.' : error.message };
+    if (!error) return employeeMutationResult(data);
+    if (isMissingRpc(error) && !input.isCoOwner) {
+      const legacy = await supabase.rpc('create_employee', {
+        p_actor_id: actor.id,
+        p_actor_token: actor.token,
+        p_name: input.name,
+        p_phone: input.phone,
+        p_can_edit: input.canEditCatalog,
+        p_can_add: input.canAddProducts,
+      });
+      if (!legacy.error) return employeeMutationResult(legacy.data);
+      return {
+        ok: false,
+        error: isMissingRpc(legacy.error) ? EMPLOYEE_MIGRATION_REQUIRED : legacy.error.message,
+      };
+    }
+    return { ok: false, error: isMissingRpc(error) ? EMPLOYEE_MIGRATION_REQUIRED : error.message };
   }
   return { ok: false, error: 'Session gérant requise.' };
 }
@@ -532,9 +573,36 @@ export async function updateEmployee(
       if (!result.employee || typeof result.employee.id !== 'string') {
         return { ok: false, error: 'Le serveur n’a pas renvoyé les données de l’employé modifié.' };
       }
-      return { ok: true, employee: result.employee };
+      return { ok: true, employee: { ...result.employee, is_co_owner: result.employee.is_co_owner === true } };
     }
-    return { ok: false, error: isMissingRpc(error) ? 'La base doit être mise à jour avant de gérer les employés.' : error.message };
+    if (isMissingRpc(error) && patch.isCoOwner !== true) {
+      const legacy = await supabase.rpc('update_employee', {
+        p_actor_id: actor.id,
+        p_actor_token: actor.token,
+        p_employee_id: employeeId,
+        p_status: patch.status ?? null,
+        p_can_edit: typeof patch.canEditCatalog === 'boolean' ? patch.canEditCatalog : null,
+        p_can_add: typeof patch.canAddProducts === 'boolean' ? patch.canAddProducts : null,
+      });
+      if (!legacy.error) {
+        const result = legacy.data as { ok?: unknown; employee?: Employee; error?: unknown } | null;
+        if (result?.ok === true && result.employee && typeof result.employee.id === 'string') {
+          return {
+            ok: true,
+            employee: { ...result.employee, is_co_owner: result.employee.is_co_owner === true },
+          };
+        }
+        return {
+          ok: false,
+          error: typeof result?.error === 'string' ? result.error : 'La modification a été refusée par le serveur.',
+        };
+      }
+      return {
+        ok: false,
+        error: isMissingRpc(legacy.error) ? EMPLOYEE_MIGRATION_REQUIRED : legacy.error.message,
+      };
+    }
+    return { ok: false, error: isMissingRpc(error) ? EMPLOYEE_MIGRATION_REQUIRED : error.message };
   }
   return { ok: false, error: 'Session gérant requise.' };
 }
@@ -819,9 +887,10 @@ export async function fetchProductStockDetails(productId: string): Promise<{
 
 export async function uploadProductImage(
   file: File,
-  productId: string
+  productId: string,
+  cacheVersion = Date.now(),
 ): Promise<string | null> {
-  if (!supabase) return null;
+  if (!supabase) throw new Error('Supabase non configuré');
 
   // Lire la photo originale
   const image = await createImageBitmap(file);
@@ -879,10 +948,17 @@ export async function uploadProductImage(
       .from('product-images')
       .getPublicUrl(path);
 
-    return data.publicUrl ? `${data.publicUrl}?v=${Date.now()}` : null;
+    return data.publicUrl ? `${data.publicUrl}?v=${cacheVersion}` : null;
   } finally {
     image.close();
   }
+}
+
+export function productImagePublicUrl(file: File, productId: string, cacheVersion = Date.now()): string {
+  if (!supabase) throw new Error('Supabase non configuré');
+  const path = `products/${productId}/${file.name}`;
+  const { data } = supabase.storage.from('product-images').getPublicUrl(path);
+  return `${data.publicUrl}?v=${cacheVersion}`;
 }
 
 

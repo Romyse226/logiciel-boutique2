@@ -17,6 +17,9 @@ export function userMessage(e: unknown): string {
           : '';
   if (!raw) return 'L’action a échoué. Réessayez.';
 
+  if (/base doit être mise à jour|migration.*(employé|co-gérant)|fonction .*schema cache/i.test(raw)) {
+    return 'La base Supabase doit être mise à jour pour gérer les employés. Exécutez la dernière migration du projet puis réessayez.';
+  }
   if (/more target columns than expressions|syntax error|does not exist|violates .* constraint|invalid input|permission denied/i.test(raw)) {
     return 'Action impossible : les informations envoyées sont incomplètes. Réessayez.';
   }

@@ -22,18 +22,19 @@ interface Props {
   onRefresh: () => void | Promise<void>;
   /** Retour vers l'accueil (visible à toutes les étapes de la vente). */
   onBack: () => void;
+  editMode: boolean;
+  onEditModeChange: (enabled: boolean) => void;
 }
 
 export function SellPage({
   products, categories, canEditCatalog, canAddProducts,
   onSelect, onEdit, onDelete, onNewProduct, onNotify, onRefresh, onBack,
+  editMode, onEditModeChange,
 }: Props) {
   const pull = usePullToRefresh(onRefresh);
   const [query, setQuery] = useState('');
   const [activeCat, setActiveCat] = useState<string | null>(null);
   const [listening, setListening] = useState(false);
-  // Mode édition : masqué par défaut, activé par le bouton crayon de l'en-tête.
-  const [editMode, setEditMode] = useState(false);
   const [recognitionSupported] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     return 'webkitSpeechRecognition' in window || 'SpeechRecognition' in window;
@@ -87,7 +88,7 @@ export function SellPage({
           {/* Bouton crayon : active / désactive le mode édition (icônes des cartes). */}
           <button
             type="button"
-            onClick={() => setEditMode((v) => !v)}
+            onClick={() => onEditModeChange(!editMode)}
             aria-pressed={editMode}
             aria-label={editMode ? 'Quitter le mode édition' : 'Modifier les produits'}
             title={editMode ? 'Quitter le mode édition' : 'Modifier les produits'}
@@ -116,7 +117,7 @@ export function SellPage({
           <p className="min-w-0 text-sm font-bold">Mode édition : modifiez ou supprimez un produit.</p>
           <button
             type="button"
-            onClick={() => setEditMode(false)}
+            onClick={() => onEditModeChange(false)}
             className="shrink-0 rounded-xl bg-white/20 px-3 py-1.5 text-sm font-bold active:scale-95"
           >
             Terminer

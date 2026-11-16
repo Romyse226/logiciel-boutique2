@@ -112,17 +112,22 @@ export function EmployeesPage({ actor, onBack, onNotify }: Props) {
     if (creating) return;
     if (!name.trim()) { setAddError('Le nom de l’employé est requis.'); return; }
     setCreating(true); setAddError(null);
-    const res = await createEmployee(actor, {
-      name: name.trim(),
-      phone: phone.trim() || null,
-      canEditCatalog: canEdit,
-      canAddProducts: canAdd,
-      isCoOwner,
-    });
-    setCreating(false);
-    if (!res.ok || !res.employee) { setAddError(userMessage(res.error)); return; }
-    setJustCreated(res.employee);
-    setEmployees((prev) => [...prev, res.employee!]);
+    try {
+      const res = await createEmployee(actor, {
+        name: name.trim(),
+        phone: phone.trim() || null,
+        canEditCatalog: canEdit,
+        canAddProducts: canAdd,
+        isCoOwner,
+      });
+      if (!res.ok || !res.employee) { setAddError(userMessage(res.error)); return; }
+      setJustCreated(res.employee);
+      setEmployees((prev) => [...prev, res.employee!]);
+    } catch (e) {
+      setAddError(userMessage(e));
+    } finally {
+      setCreating(false);
+    }
   }
 
   function closeAdd() {

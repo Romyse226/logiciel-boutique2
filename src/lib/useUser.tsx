@@ -1,7 +1,8 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { UserProfile } from '@/types';
 
 const LEGACY_PROFILE_KEY = 'quincaillerie.userProfile';
+const OFFLINE_PROFILE_KEY = 'quincaillerie.offlineProfile';
 
 interface LegacyEmployeeIdentity {
   employeeId: string;
@@ -36,6 +37,30 @@ function emptyProfile(): UserProfile {
   };
 }
 
+function readOfflineProfile(): UserProfile {
+  try {
+    const raw = localStorage.getItem(OFFLINE_PROFILE_KEY);
+    if (!raw) return emptyProfile();
+    const value = JSON.parse(raw) as Partial<UserProfile>;
+    if (typeof value.employeeId !== 'string' || !value.employeeId) return emptyProfile();
+    const isOwner = value.isOwner === true;
+    const isCoOwner = value.isCoOwner === true;
+    return {
+      ...emptyProfile(),
+      role: isOwner || isCoOwner ? 'gerant' : 'employe',
+      name: typeof value.name === 'string' ? value.name : '',
+      canEditCatalog: isOwner || isCoOwner || value.canEditCatalog === true,
+      canAddProducts: isOwner || isCoOwner || value.canAddProducts === true,
+      employeeId: value.employeeId,
+      isOwner,
+      isCoOwner,
+      onboarded: true,
+    };
+  } catch {
+    return emptyProfile();
+  }
+}
+
 interface IdentityInput {
   employeeId: string;
   name: string;
@@ -60,9 +85,26 @@ interface UserContextValue {
 const UserContext = createContext<UserContextValue | null>(null);
 
 export function UserProvider({ children }: { children: ReactNode }) {
-  const [profile, setProfile] = useState<UserProfile>(emptyProfile);
+  const [profile, setProfile] = useState<UserProfile>(readOfflineProfile);
   const [identityReady, setIdentityReady] = useState(false);
   const [legacyEmployee, setLegacyEmployee] = useState<LegacyEmployeeIdentity | null>(readLegacyEmployeeIdentity);
+
+  useEffect(() => {
+    if (!profile.employeeId) return;
+    try {
+      localStorage.setItem(OFFLINE_PROFILE_KEY, JSON.stringify({
+        employeeId: profile.employeeId,
+        name: profile.name,
+        role: profile.role,
+        canEditCatalog: profile.canEditCatalog,
+        canAddProducts: profile.canAddProducts,
+        isOwner: profile.isOwner,
+        isCoOwner: profile.isCoOwner,
+      }));
+    } catch {
+      // Offline identity caching is best-effort; the authenticated session remains authoritative online.
+    }
+  }, [profile]);
 
   const markIdentityReady = useCallback(() => setIdentityReady(true), []);
 
@@ -121,6 +163,11 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
   const clearIdentity = useCallback(() => {
     setProfile(emptyProfile());
+    try {
+      localStorage.removeItem(OFFLINE_PROFILE_KEY);
+    } catch {
+      // Sign-out still clears the in-memory identity when storage is unavailable.
+    }
     setIdentityReady(true);
   }, []);
 
