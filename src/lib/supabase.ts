@@ -910,13 +910,9 @@ export async function fetchProductStockDetails(productId: string): Promise<{
 // ---------- Storage (product images) ----------
 
 function productImageStoragePath(file: File, productId: string): string {
-  // Nettoie l'ID (que des lettres/chiffres/tirets)
-  const safeId = productId.replace(/[^a-zA-Z0-9-]/g, '');
-  // Garde l'extension d'origine, mais nettoie tout le reste (accents, espaces, parenthèses…)
   const originalExt = file.name.split('.').pop()?.toLowerCase() ?? 'jpg';
   const safeExt = originalExt.replace(/[^a-z0-9]/g, '') || 'jpg';
-  // Nom de fichier généré — AUCUN caractère du nom d'origine n'est réutilisé
-  return `products/${safeId}-${Date.now()}.${safeExt}`;
+  return `products/${productId}/${Date.now()}.${safeExt}`;
 }
 
 export async function uploadProductImage(
