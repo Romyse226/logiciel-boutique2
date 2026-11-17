@@ -38,8 +38,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['icon.svg', 'favicon.ico', 'apple-touch-icon.png', 'apple-touch-180.png'],
       manifest: {
-        name: 'Quincaillerie — Vente & Stock',
-        short_name: 'Quincaillerie',
+        name: 'Mon logiciel',
+        short_name: 'Mon logiciel',
         description: 'Application de vente pour quincaillerie en Côte d\'Ivoire.',
         lang: 'fr',
         start_url: '/',

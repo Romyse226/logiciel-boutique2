@@ -76,8 +76,8 @@ export function applyPwaStoreIcon(iconUrl: string | null): void {
   }
 
   const manifest = {
-    name: 'Quincaillerie — Vente & Stock',
-    short_name: 'Quincaillerie',
+    name: 'Mon logiciel',
+    short_name: 'Mon logiciel',
     description: 'Application de vente pour quincaillerie en Côte d’Ivoire.',
     lang: 'fr',
     start_url: new URL('/', window.location.href).href,
