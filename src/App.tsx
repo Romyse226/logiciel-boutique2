@@ -26,6 +26,7 @@ import { UNIT_GROS, UNIT_DETAIL, isGrosUnit, isDetailUnit } from '@/lib/product'
 import {
   fetchCategories, fetchProducts, fetchStore, registerSale, fetchSaleWithItems,
   isSupabaseConfigured, pingSupabase, saveProduct, isProductArchived, employeeState,
+  createStoreCategory, deleteStoreCategory,
   uploadProductImage, deleteProductImage, uploadStoreIcon, updateStore, authPortal, setAuthSession,
   getAuthenticatedEmployee, signOut as signOutSupabase, supabase, type Actor, type AuthPortalResult,
   productImagePathFromUrl, productImagePublicUrl,
@@ -156,7 +157,12 @@ export default function App() {
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<ProductCategory[]>([]);
   const [store, setStore] = useState<StoreInfo | null>(null);
-  const [storeIconUrl, setStoreIconUrl] = useState<string | null>(null);
+  const [storeIconUrl, setStoreIconUrl] = useState<string | null>(() => {
+    const snapshot = profile.employeeId ? readOfflineSnapshot(profile.employeeId) : null;
+    return snapshot
+      ? cachedStoreIcon(snapshot.store.id) ?? snapshot.store.icon_url ?? null
+      : null;
+  });
   const [savingStoreIcon, setSavingStoreIcon] = useState(false);
   const storeIconInput = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(true);
@@ -223,8 +229,8 @@ export default function App() {
   }, [profile.employeeId]);
 
   useEffect(() => {
-    applyPwaStoreIcon(storeIconUrl);
-  }, [storeIconUrl]);
+    applyPwaStoreIcon(store?.icon_url ?? null);
+  }, [store?.icon_url]);
 
   useEffect(() => {
     if (!profile.employeeId) return;
@@ -694,6 +700,25 @@ export default function App() {
     setEditorOpen(true);
   }
 
+  async function handleCreateCategory(name: string) {
+    if (!offline.online) throw new Error('Une connexion est nécessaire pour ajouter une catégorie.');
+    const identity = await resolveActor();
+    if (!identity.actor) throw new Error(identity.error ?? 'Session gérant requise.');
+    const category = await createStoreCategory(identity.actor, name);
+    setCategories((current) => [...current, category].sort((a, b) => a.sort_order - b.sort_order));
+  }
+
+  async function handleDeleteCategory(category: ProductCategory) {
+    if (!offline.online) throw new Error('Une connexion est nécessaire pour supprimer une catégorie.');
+    const identity = await resolveActor();
+    if (!identity.actor) throw new Error(identity.error ?? 'Session gérant requise.');
+    await deleteStoreCategory(identity.actor, category.id);
+    setCategories((current) => current.filter((item) => item.id !== category.id));
+    setProducts((current) => current.map((product) => product.category_id === category.id
+      ? { ...product, category_id: null, category: null }
+      : product));
+  }
+
   function applyLocalProductUpdate(input: ProductInput) {
     setProducts((prev) => prev.map((p) => {
       if (p.id !== input.id) return p;
@@ -996,10 +1021,7 @@ export default function App() {
                 type="button"
                 onClick={() => go('home')}
                 className={classNames(
-                  'flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl text-white shadow transition',
-                  productEditMode
-                    ? 'bg-slate-900 ring-1 ring-cyan-200/50'
-                    : 'bg-gradient-to-br from-pink-400 to-fuchsia-600',
+                  'flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-slate-300 bg-pink-50 text-pink-600',
                 )}
                 aria-label="Accueil"
               >
@@ -1086,6 +1108,8 @@ export default function App() {
               onBack={() => go('home')}
               editMode={productEditMode}
               onEditModeChange={setProductEditMode}
+              onCreateCategory={handleCreateCategory}
+              onDeleteCategory={handleDeleteCategory}
             />
           )
         ) : tab === 'history' ? (

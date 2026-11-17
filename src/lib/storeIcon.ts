@@ -10,37 +10,18 @@ export async function makeStoreIcon(file: File): Promise<{ blob: Blob; dataUrl: 
     const context = canvas.getContext('2d');
     if (!context) throw new Error('Impossible de traiter cette image.');
 
-    const background = context.createLinearGradient(0, 0, 512, 512);
-    background.addColorStop(0, '#111827');
-    background.addColorStop(1, '#312e81');
-    context.fillStyle = background;
-    context.fillRect(0, 0, 512, 512);
-
     const size = Math.min(image.width, image.height);
-    const inset = 24;
-    const diameter = canvas.width - inset * 2;
-    context.save();
-    context.beginPath();
-    context.arc(256, 256, diameter / 2, 0, Math.PI * 2);
-    context.clip();
     context.drawImage(
       image,
       (image.width - size) / 2,
       (image.height - size) / 2,
       size,
       size,
-      inset,
-      inset,
-      diameter,
-      diameter,
+      0,
+      0,
+      canvas.width,
+      canvas.height,
     );
-    context.restore();
-
-    context.beginPath();
-    context.arc(256, 256, diameter / 2, 0, Math.PI * 2);
-    context.strokeStyle = '#a5f3fc';
-    context.lineWidth = 8;
-    context.stroke();
 
     const blob = await new Promise<Blob>((resolve, reject) => {
       canvas.toBlob((result) => {

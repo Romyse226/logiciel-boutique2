@@ -50,6 +50,7 @@ export function EmployeesPage({ actor, onBack, onNotify }: Props) {
   const [creating, setCreating] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
   const [justCreated, setJustCreated] = useState<Employee | null>(null);
+  const [coOwnerConfirm, setCoOwnerConfirm] = useState<{ confirm: () => void } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -214,7 +215,10 @@ export function EmployeesPage({ actor, onBack, onNotify }: Props) {
                   <Toggle
                     checked={e.is_co_owner}
                     disabled={busy}
-                    onChange={(v) => patch(e.id, { isCoOwner: v })}
+                    onChange={(v) => {
+                      if (v) setCoOwnerConfirm({ confirm: () => { void patch(e.id, { isCoOwner: true }); } });
+                      else void patch(e.id, { isCoOwner: false });
+                    }}
                     label="Autoriser Espace Boss"
                     icon={Crown}
                     color="text-violet-600"
@@ -325,7 +329,16 @@ export function EmployeesPage({ actor, onBack, onNotify }: Props) {
                   <div className="space-y-2">
                     <Toggle checked={canEdit} onChange={setCanEdit} label="Autoriser à modifier les informations du stock" icon={ShieldCheck} color="text-blue-600" />
                     <Toggle checked={canAdd} onChange={setCanAdd} label="Autoriser à ajouter de nouveaux produits" icon={ShieldCheck} color="text-orange-600" />
-                    <Toggle checked={isCoOwner} onChange={setIsCoOwner} label="Autoriser Espace Boss" icon={Crown} color="text-violet-600" />
+                    <Toggle
+                      checked={isCoOwner}
+                      onChange={(value) => {
+                        if (value) setCoOwnerConfirm({ confirm: () => setIsCoOwner(true) });
+                        else setIsCoOwner(false);
+                      }}
+                      label="Autoriser Espace Boss"
+                      icon={Crown}
+                      color="text-violet-600"
+                    />
                   </div>
                   {addError && <p className="rounded-xl bg-red-50 p-3 text-sm font-semibold text-red-700 ring-1 ring-red-200">{addError}</p>}
                 </div>
@@ -341,6 +354,36 @@ export function EmployeesPage({ actor, onBack, onNotify }: Props) {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {coOwnerConfirm && (
+        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-900/50 p-4 sm:items-center">
+          <div className="w-full max-w-sm space-y-4 rounded-2xl bg-white p-5 shadow-xl">
+            <h2 className="text-lg font-extrabold text-slate-800">Autoriser l’Espace Boss ?</h2>
+            <p className="text-sm leading-relaxed text-slate-600">
+              En autorisant cette personne, elle aura les mêmes droits et toutes les fonctionnalités que vous en tant que Boss.
+            </p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setCoOwnerConfirm(null)}
+                className="flex-1 rounded-xl bg-slate-100 px-4 py-2.5 text-sm font-bold text-slate-700"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  coOwnerConfirm.confirm();
+                  setCoOwnerConfirm(null);
+                }}
+                className="flex-1 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-bold text-white"
+              >
+                Confirmer
+              </button>
+            </div>
           </div>
         </div>
       )}

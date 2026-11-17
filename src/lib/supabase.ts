@@ -158,6 +158,31 @@ export async function fetchCategories(): Promise<ProductCategory[]> {
   return (data ?? []) as ProductCategory[];
 }
 
+export async function createStoreCategory(actor: Actor, name: string): Promise<ProductCategory> {
+  if (!supabase || !actor.id) throw new Error('Session gérant requise.');
+  const { data, error } = await supabase.rpc('create_store_category', {
+    p_actor_id: actor.id,
+    p_name: name,
+  });
+  if (error) throw error;
+  const result = data as { ok?: boolean; category?: ProductCategory; error?: string } | null;
+  if (!result?.ok || !result.category) {
+    throw new Error(result?.error ?? 'La création de la catégorie a été refusée.');
+  }
+  return result.category;
+}
+
+export async function deleteStoreCategory(actor: Actor, categoryId: string): Promise<void> {
+  if (!supabase || !actor.id) throw new Error('Session gérant requise.');
+  const { data, error } = await supabase.rpc('delete_store_category', {
+    p_actor_id: actor.id,
+    p_category_id: categoryId,
+  });
+  if (error) throw error;
+  const result = data as { ok?: boolean; error?: string } | null;
+  if (!result?.ok) throw new Error(result?.error ?? 'La suppression de la catégorie a été refusée.');
+}
+
 export async function fetchProducts(includeArchived = false): Promise<Product[]> {
   if (!supabase) return [];
   let q = supabase

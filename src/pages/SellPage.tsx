@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Mic, Search, X, Filter, Plus, Pencil, ChevronLeft } from 'lucide-react';
+import { Mic, Search, X, Filter, Plus, Pencil, ChevronLeft, Loader2 } from 'lucide-react';
 import type { Product, ProductCategory } from '@/types';
 import { ProductCard } from '@/components/ProductCard';
 import { colorOf } from '@/lib/colors';
@@ -24,17 +24,25 @@ interface Props {
   onBack: () => void;
   editMode: boolean;
   onEditModeChange: (enabled: boolean) => void;
+  onCreateCategory: (name: string) => Promise<void>;
+  onDeleteCategory: (category: ProductCategory) => Promise<void>;
 }
 
 export function SellPage({
   products, categories, canEditCatalog, canAddProducts,
   onSelect, onEdit, onDelete, onNewProduct, onNotify, onRefresh, onBack,
   editMode, onEditModeChange,
+  onCreateCategory, onDeleteCategory,
 }: Props) {
   const pull = usePullToRefresh(onRefresh);
   const [query, setQuery] = useState('');
   const [activeCat, setActiveCat] = useState<string | null>(null);
   const [listening, setListening] = useState(false);
+  const [addCategoryOpen, setAddCategoryOpen] = useState(false);
+  const [categoryName, setCategoryName] = useState('');
+  const [categoryError, setCategoryError] = useState<string | null>(null);
+  const [pendingCategoryDelete, setPendingCategoryDelete] = useState<ProductCategory | null>(null);
+  const [categoryBusy, setCategoryBusy] = useState(false);
   const [recognitionSupported] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     return 'webkitSpeechRecognition' in window || 'SpeechRecognition' in window;
@@ -48,6 +56,40 @@ export function SellPage({
       return p.name.toLowerCase().includes(q) || (p.category?.name.toLowerCase().includes(q) ?? false);
     });
   }, [products, query, activeCat]);
+
+  async function submitCategory() {
+    if (categoryBusy) return;
+    if (!categoryName.trim()) {
+      setCategoryError('Le nom de la catégorie est requis.');
+      return;
+    }
+    setCategoryBusy(true);
+    setCategoryError(null);
+    try {
+      await onCreateCategory(categoryName.trim());
+      setCategoryName('');
+      setAddCategoryOpen(false);
+    } catch (error) {
+      setCategoryError(error instanceof Error ? error.message : 'La catégorie n’a pas pu être créée.');
+    } finally {
+      setCategoryBusy(false);
+    }
+  }
+
+  async function confirmCategoryDelete() {
+    if (!pendingCategoryDelete || categoryBusy) return;
+    setCategoryBusy(true);
+    setCategoryError(null);
+    try {
+      await onDeleteCategory(pendingCategoryDelete);
+      setActiveCat(null);
+      setPendingCategoryDelete(null);
+    } catch (error) {
+      setCategoryError(error instanceof Error ? error.message : 'La catégorie n’a pas pu être supprimée.');
+    } finally {
+      setCategoryBusy(false);
+    }
+  }
 
   function toggleVoice() {
     if (!recognitionSupported) return;
@@ -165,7 +207,7 @@ export function SellPage({
         )}
       </div>
 
-      <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className="-mx-4 flex items-center gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <button
           type="button"
           onClick={() => setActiveCat(null)}
@@ -180,20 +222,47 @@ export function SellPage({
           const c = colorOf(cat.color);
           const active = activeCat === cat.id || activeCat === cat.slug;
           return (
-            <button
-              key={cat.id}
-              type="button"
-              onClick={() => setActiveCat(active ? null : cat.id)}
-              className={classNames(
-                'shrink-0 rounded-full px-3.5 py-1.5 text-sm font-bold ring-1 transition',
-                active ? classNames(c.bg, 'text-outline text-white ring-transparent') : 'bg-white text-slate-600 ring-slate-200 hover:ring-slate-300',
+            <span key={cat.id} className="relative shrink-0">
+              <button
+                type="button"
+                onClick={() => setActiveCat(active ? null : cat.id)}
+                className={classNames(
+                  'rounded-full px-3.5 py-1.5 text-sm font-bold ring-1 transition',
+                  editMode && canEditCatalog ? 'pr-8' : '',
+                  active ? classNames(c.bg, 'text-outline text-white ring-transparent') : 'bg-white text-slate-600 ring-slate-200 hover:ring-slate-300',
+                )}
+              >
+                {cat.name}
+              </button>
+              {editMode && canEditCatalog && (
+                <button
+                  type="button"
+                  onClick={() => { setCategoryError(null); setPendingCategoryDelete(cat); }}
+                  className="absolute right-1 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full bg-red-50 text-red-600 hover:bg-red-100"
+                  aria-label={`Supprimer la catégorie ${cat.name}`}
+                >
+                  <X size={14} />
+                </button>
               )}
-            >
-              {cat.name}
-            </button>
+            </span>
           );
         })}
+        {editMode && canEditCatalog && (
+          <button
+            type="button"
+            onClick={() => { setCategoryError(null); setCategoryName(''); setAddCategoryOpen(true); }}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-dashed border-slate-400 bg-white text-slate-600 hover:border-slate-600 hover:text-slate-900"
+            aria-label="Ajouter une catégorie"
+            title="Ajouter une catégorie"
+          >
+            <Plus size={18} />
+          </button>
+        )}
       </div>
+
+      {categoryError && !addCategoryOpen && (
+        <p className="rounded-xl bg-red-50 p-3 text-sm font-semibold text-red-700">{categoryError}</p>
+      )}
 
       {filtered.length === 0 ? (
         <div className="rounded-2xl bg-white p-8 text-center text-slate-500 ring-1 ring-slate-100">
@@ -213,6 +282,73 @@ export function SellPage({
               editMode={editMode}
             />
           ))}
+        </div>
+      )}
+
+      {addCategoryOpen && (
+        <div className="fixed inset-0 z-[70] flex items-end justify-center bg-slate-900/50 p-4 sm:items-center">
+          <div className="w-full max-w-sm space-y-4 rounded-2xl bg-white p-5 shadow-xl">
+            <h2 className="text-lg font-extrabold text-slate-800">Nouvelle catégorie</h2>
+            <input
+              autoFocus
+              value={categoryName}
+              onChange={(event) => setCategoryName(event.target.value)}
+              onKeyDown={(event) => { if (event.key === 'Enter') void submitCategory(); }}
+              placeholder="Nom de la catégorie"
+              className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-orange-400"
+            />
+            {categoryError && <p className="text-sm font-semibold text-red-700">{categoryError}</p>}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setAddCategoryOpen(false)}
+                disabled={categoryBusy}
+                className="flex-1 rounded-xl bg-slate-100 px-4 py-2.5 text-sm font-bold text-slate-700"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={() => void submitCategory()}
+                disabled={categoryBusy}
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-orange-500 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60"
+              >
+                {categoryBusy && <Loader2 size={16} className="animate-spin" />}
+                Ajouter
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingCategoryDelete && (
+        <div className="fixed inset-0 z-[70] flex items-end justify-center bg-slate-900/50 p-4 sm:items-center">
+          <div className="w-full max-w-sm space-y-4 rounded-2xl bg-white p-5 shadow-xl">
+            <h2 className="text-lg font-extrabold text-slate-800">Supprimer cette catégorie ?</h2>
+            <p className="text-sm text-slate-600">
+              Les produits de « {pendingCategoryDelete.name} » seront conservés sans catégorie.
+            </p>
+            {categoryError && <p className="text-sm font-semibold text-red-700">{categoryError}</p>}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setPendingCategoryDelete(null)}
+                disabled={categoryBusy}
+                className="flex-1 rounded-xl bg-slate-100 px-4 py-2.5 text-sm font-bold text-slate-700"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmCategoryDelete()}
+                disabled={categoryBusy}
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60"
+              >
+                {categoryBusy && <Loader2 size={16} className="animate-spin" />}
+                Supprimer
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
