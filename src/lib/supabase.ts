@@ -909,6 +909,9 @@ export async function fetchProductStockDetails(productId: string): Promise<{
 
 // ---------- Storage (product images) ----------
 
+function productImageStoragePath(file: File, productId: string): string {
+  return `products/${productId}/${file.name}`;
+}
 
 export async function uploadProductImage(
   file: File,
@@ -968,9 +971,8 @@ export async function uploadProductImage(
       );
     });
 
-    const path = `products/${productId}/${file.name}`;
-
-    const { error } = await supabase.storage
+    const path = productImageStoragePath(file, productId);
+    const { data: uploaded, error } = await supabase.storage
       .from('product-images')
       .upload(path, blob, {
         cacheControl: '3600',
@@ -979,10 +981,11 @@ export async function uploadProductImage(
       });
 
     if (error) throw error;
+    if (!uploaded?.path) throw new Error('Supabase Storage n’a pas confirmé le chemin de la photo.');
 
     const { data } = supabase.storage
       .from('product-images')
-      .getPublicUrl(path);
+      .getPublicUrl(uploaded.path);
 
     return data.publicUrl ? `${data.publicUrl}?v=${cacheVersion}` : null;
   } finally {
@@ -993,7 +996,7 @@ export async function uploadProductImage(
 
 export function productImagePublicUrl(file: File, productId: string, cacheVersion = Date.now()): string {
   if (!supabase) throw new Error('Supabase non configuré');
-  const path = `products/${productId}/${file.name}`;
+  const path = productImageStoragePath(file, productId);
   const { data } = supabase.storage.from('product-images').getPublicUrl(path);
   return `${data.publicUrl}?v=${cacheVersion}`;
 }

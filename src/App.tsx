@@ -196,11 +196,16 @@ export default function App() {
    * locaux historiques ne sont plus acceptés comme preuve d'identité.
    */
   const resolveActor = useCallback(async (): Promise<{ actor: Actor | null; error: string | null }> => {
-    if (actor.id && actor.token) return { actor, error: null };
-    if (actor.id && supabase) return { actor: { id: actor.id, token: '' }, error: null };
-    if (!isSupabaseConfigured) {
+    if (!isSupabaseConfigured || !supabase) {
       return { actor: null, error: 'Connexion au serveur impossible. Vérifie ton réseau.' };
     }
+    const { data, error } = await supabase.auth.getSession();
+    if (error) return { actor: null, error: userMessage(error) };
+    if (!data.session?.access_token) {
+      return { actor: null, error: 'Session Supabase expirée : reconnecte-toi puis réessaie.' };
+    }
+    if (actor.id && actor.token) return { actor, error: null };
+    if (actor.id) return { actor: { id: actor.id, token: '' }, error: null };
     return { actor: null, error: 'Session expirée : reconnecte-toi puis réessaie.' };
   }, [actor]);
 
@@ -1505,7 +1510,7 @@ function AuthPage({
               <input value={storeName} onChange={(event) => { setStoreName(event.target.value); setSlug(slugFromName(event.target.value)); }} autoComplete="organization" placeholder="Ex. : Boutique du Centre" className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm outline-none focus:border-orange-400" />
             </label>
             <label className="mt-3 block">
-              <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Nom du gérant</span>
+              <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Nom du Patron</span>
               <input value={ownerName} onChange={(event) => setOwnerName(event.target.value)} autoComplete="name" placeholder="Ex. : Awa Koné" className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm outline-none focus:border-orange-400" />
             </label>
             <label className="mt-3 block">
