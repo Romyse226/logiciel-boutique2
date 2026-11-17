@@ -1430,8 +1430,8 @@ function AuthPage({
   }
 
   const titles: Record<Step, string> = {
-    login: 'Connexion gérant',
-    signup: 'Créer une boutique',
+    login: 'Se connecter',
+    signup: 'S\'enregistrer',
     forgot: 'PIN oublié ?',
     verify: 'Code temporaire',
     'new-pin': 'Nouveau PIN',
@@ -1492,7 +1492,7 @@ function AuthPage({
             </button>
             {host.root && usesPathRouting() && (
               <button type="button" onClick={() => { window.history.replaceState({}, '', '/'); setStep('signup'); setError(null); }} className="mt-3 w-full text-center text-sm font-semibold text-orange-600">
-                Première visite ? Créer une boutique
+                Première visite ? S'enregistrer
               </button>
             )}
           </>
@@ -1526,11 +1526,11 @@ function AuthPage({
               />
             </label>
             <button type="button" onClick={submitSignup} disabled={busy || pin.length !== 4 || !storeName.trim() || !ownerName.trim() || !phone.trim()} className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-orange-600 px-4 py-3.5 text-base font-bold text-white shadow disabled:opacity-60">
-              <Check size={20} /> {busy ? 'Création…' : 'Créer ma boutique'}
+              <Check size={20} /> {busy ? 'Création…' : 'Commencer'}
             </button>
             {host.root && usesPathRouting() && (
               <button type="button" onClick={() => { setStep('login'); setError(null); }} className="mt-3 w-full text-center text-sm font-semibold text-slate-500">
-                Déjà une boutique ? Se connecter
+                Déjà enregistré ? Connecte-toi ici
               </button>
             )}
           </>

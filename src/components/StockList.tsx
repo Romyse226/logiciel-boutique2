@@ -18,8 +18,8 @@ interface KindMeta {
 }
 
 export const STOCK_KINDS: KindMeta[] = [
-  { kind: 'ok',  label: 'Stock suffisant', title: 'Stock suffisant', icon: PackageCheck, wrap: 'bg-green-50 ring-green-200 text-green-800', solid: 'bg-green-500' },
-  { kind: 'out', label: 'Stock épuisé', title: 'Stock épuisé', icon: PackageX, wrap: 'bg-red-50 ring-red-200 text-red-800', solid: 'bg-red-500' },
+  { kind: 'ok',  label: 'Produits disponibles', title: 'Produits disponibles', icon: PackageCheck, wrap: 'bg-green-50 ring-green-200 text-green-800', solid: 'bg-green-500' },
+  { kind: 'out', label: 'Produits épuisés', title: 'Produits épuisés', icon: PackageX, wrap: 'bg-red-50 ring-red-200 text-red-800', solid: 'bg-red-500' },
 ];
 
 /**

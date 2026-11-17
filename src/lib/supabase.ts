@@ -916,11 +916,22 @@ export async function uploadProductImage(
   cacheVersion = Date.now(),
 ): Promise<string | null> {
   if (!supabase) throw new Error('Supabase non configuré');
+  if (file.size === 0) throw new Error('La photo sélectionnée est vide.');
 
-  // Lire la photo originale
-  const image = await createImageBitmap(file);
+  const imageUrl = URL.createObjectURL(file);
+  let image: (CanvasImageSource & { width: number; height: number; close?: () => void }) | null = null;
 
   try {
+    try {
+      image = await createImageBitmap(file);
+    } catch {
+      const element = new Image();
+      element.src = imageUrl;
+      await element.decode();
+      image = element;
+    }
+    if (image.width <= 0 || image.height <= 0) throw new Error('La photo sélectionnée est illisible.');
+
     // Recadrer au centre en carré
     const size = Math.min(image.width, image.height);
     const x = (image.width - size) / 2;
@@ -975,7 +986,8 @@ export async function uploadProductImage(
 
     return data.publicUrl ? `${data.publicUrl}?v=${cacheVersion}` : null;
   } finally {
-    image.close();
+    image?.close?.();
+    URL.revokeObjectURL(imageUrl);
   }
 }
 

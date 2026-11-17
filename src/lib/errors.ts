@@ -29,6 +29,12 @@ export function userMessage(e: unknown): string {
   if (/Stock insuffisant|Insufficient stock/i.test(raw)) return 'Stock insuffisant pour ce produit.';
   if (/Prix incohérent|price mismatch|inconsistent price/i.test(raw)) return 'Le prix de ce produit a changé. Actualisez puis réessayez.';
   if (/Unité de vente introuvable|Produit introuvable|Sale unit not found|Product not found/i.test(raw)) return 'Les prix de ce produit ne sont pas configurés.';
+  if (/row-level security|new row violates/i.test(raw)) {
+    return 'Supabase Storage a refusé la photo. Vérifiez que la session de la boutique est active et que les politiques du bucket product-images sont appliquées.';
+  }
+  if (/bucket .*not found|bucket not found/i.test(raw)) {
+    return 'Le stockage des photos produit n’est pas configuré sur Supabase.';
+  }
   if (/Produit archivé|archived/i.test(raw)) return 'Ce produit n’est plus disponible.';
   if (/Aucun article|No items in sale/i.test(raw)) return 'Ajoutez au moins un article.';
   if (/Quantité|Invalid quantity|decimal quantity/i.test(raw)) return 'Quantité invalide.';
