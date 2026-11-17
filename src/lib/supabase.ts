@@ -978,7 +978,7 @@ export async function uploadProductImage(
       .from('product-images')
       .upload(path, blob, {
         cacheControl: '3600',
-        upsert: true,
+        upsert: false,
         contentType: 'image/jpeg',
       });
 
