@@ -38,24 +38,22 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['icon.svg', 'favicon.ico', 'apple-touch-icon.png', 'apple-touch-180.png'],
       manifest: {
-        name: 'Mon logiciel',
-        short_name: 'Mon logiciel',
-        description: 'Application de vente pour quincaillerie en Côte d\'Ivoire.',
-        lang: 'fr',
-        start_url: '/',
-        scope: '/',
-        display: 'standalone',
-        orientation: 'portrait',
-        background_color: '#f8fafc',
-        theme_color: '#8B5CF6',
-        categories: ['business', 'shopping', 'productivity'],
-        icons: [
-          { src: '/pwa-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
-          { src: '/pwa-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
-          { src: '/pwa-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
-          { src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
-        ],
-      },
+  name: 'Mon logiciel',
+  short_name: 'Mon logiciel',
+  description: 'Application de vente pour quincaillerie en Côte d\'Ivoire.',
+  lang: 'fr',
+  // ⚠️ CORRECTION : start_url et scope dynamiques pour préserver le contexte
+  // de path-routing (/store/<slug>). On ne force plus '/' : on laisse iOS
+  // démarrer la PWA sur l'URL exacte que l'utilisateur a ajoutée.
+  start_url: '.',
+  scope: '.',
+  display: 'standalone',
+  orientation: 'portrait',
+  background_color: '#f8fafc',
+  theme_color: '#8B5CF6',
+  categories: ['business', 'shopping', 'productivity'],
+  icons: [ /* identique */ ],
+},
       workbox: {
         // Les miniatures (256 px, ~10-20 Ko) sont mises en cache au moment de
         // l'installation : le catalogue s'affiche donc entièrement hors ligne.

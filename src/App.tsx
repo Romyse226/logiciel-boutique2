@@ -3,6 +3,7 @@ import {
   Home, ShoppingCart, History, Crown, Plus, Store as StoreIcon,
   Check, ArrowRight, LogOut, Pencil,
 } from 'lucide-react';
+import { persistentStorage } from '@/lib/persistentStorage';
 import { classNames, formatFCFA, vibrate } from '@/lib/format';
 import { getHostContext, slugFromName, storeUrl, usesPathRouting } from '@/lib/tenant';
 import { userMessage } from '@/lib/errors';
@@ -57,7 +58,7 @@ function offlineSnapshotKey(employeeId: string): string {
 
 function readOfflineSnapshot(employeeId: string): OfflineSnapshot | null {
   try {
-    const raw = localStorage.getItem(offlineSnapshotKey(employeeId));
+    const raw = persistentStorage.getItem(offlineSnapshotKey(employeeId));
     if (!raw) return null;
     const value = JSON.parse(raw) as Partial<OfflineSnapshot>;
     if (!value.store || typeof value.store.id !== 'string'
@@ -74,7 +75,7 @@ function readOfflineSnapshot(employeeId: string): OfflineSnapshot | null {
 
 function writeOfflineSnapshot(employeeId: string, snapshot: OfflineSnapshot): boolean {
   try {
-    localStorage.setItem(offlineSnapshotKey(employeeId), JSON.stringify(snapshot));
+    persistentStorage.setItem(offlineSnapshotKey(employeeId), JSON.stringify(snapshot));
     return true;
   } catch {
     return false;
@@ -337,12 +338,32 @@ export default function App() {
     identityBootstrapStarted.current = true;
     (async () => {
       try {
+        // ─── CORRECTION : capture ou rattrapage du token d'invitation ───
+        // 1) On lit d'abord l'URL (premier chargement web après clic WhatsApp).
+        // 2) Si absent, on lit le cookie persisté lors d'un précédent chargement web
+        //    (cas : employé a ajouté la PWA AVANT d'accepter l'invitation).
+        // 3) En dernier recours, on lit le paramètre conservé dans l'URL de lancement PWA.
         const params = new URLSearchParams(window.location.search);
-        const invite = params.get('invite');
+        let invite = params.get('invite');
+
+        if (invite) {
+          // Persiste immédiatement : si l'utilisateur ajoute la PWA à l'écran
+          // d'accueil maintenant, le token survivra dans le cookie partagé.
+          persistentStorage.setCookieOnly('pending_invite', invite);
+        } else {
+          invite = persistentStorage.getCookieOnly('pending_invite');
+          if (invite) params.set('invite', invite); // pour le nettoyage d'URL plus bas
+        }
+
         const host = getHostContext();
-        if (invite && isSupabaseConfigured && host.slug) {
+        // ⚠️ CORRECTION : l'invitation ne dépend plus de host.slug.
+        // Sur un lancement PWA iOS démarré à '/', host.slug peut être null alors
+        // que l'invitation est parfaitement valide (le backend retrouve la
+        // boutique à partir du token). On accepte donc l'invitation partout.
+        if (invite && isSupabaseConfigured) {
           const result = await authPortal({ action: 'accept-invite', token: invite });
           await applyPortalSession(result);
+          persistentStorage.removeCookieOnly('pending_invite');
           params.delete('invite');
           const query = params.toString();
           window.history.replaceState({}, '', `${window.location.pathname}${query ? `?${query}` : ''}`);
@@ -400,7 +421,7 @@ export default function App() {
 
         if (!sessionData.session && navigator.onLine) clearIdentity();
 
-        if (legacyEmployee && host.slug) {
+        if (legacyEmployee) {
           const result = await authPortal({
             action: 'accept-invite',
             token: legacyEmployee.accessToken,

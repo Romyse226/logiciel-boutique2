@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { UserProfile } from '@/types';
+import { persistentStorage } from '@/lib/persistentStorage';
 
 const LEGACY_PROFILE_KEY = 'quincaillerie.userProfile';
 const OFFLINE_PROFILE_KEY = 'quincaillerie.offlineProfile';
@@ -11,7 +12,7 @@ interface LegacyEmployeeIdentity {
 
 function readLegacyEmployeeIdentity(): LegacyEmployeeIdentity | null {
   try {
-    const raw = localStorage.getItem(LEGACY_PROFILE_KEY);
+    const raw = persistentStorage.getItem(LEGACY_PROFILE_KEY);
     if (!raw) return null;
     const stored = JSON.parse(raw) as Partial<UserProfile>;
     if (stored.role !== 'employe' || stored.isOwner || !stored.employeeId || !stored.accessToken) return null;
@@ -39,7 +40,7 @@ function emptyProfile(): UserProfile {
 
 function readOfflineProfile(): UserProfile {
   try {
-    const raw = localStorage.getItem(OFFLINE_PROFILE_KEY);
+    const raw = persistentStorage.getItem(OFFLINE_PROFILE_KEY);
     if (!raw) return emptyProfile();
     const value = JSON.parse(raw) as Partial<UserProfile>;
     if (typeof value.employeeId !== 'string' || !value.employeeId) return emptyProfile();
@@ -92,7 +93,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!profile.employeeId) return;
     try {
-      localStorage.setItem(OFFLINE_PROFILE_KEY, JSON.stringify({
+      persistentStorage.setItem(OFFLINE_PROFILE_KEY, JSON.stringify({
         employeeId: profile.employeeId,
         name: profile.name,
         role: profile.role,
@@ -164,7 +165,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const clearIdentity = useCallback(() => {
     setProfile(emptyProfile());
     try {
-      localStorage.removeItem(OFFLINE_PROFILE_KEY);
+      persistentStorage.removeItem(OFFLINE_PROFILE_KEY);
     } catch {
       // Sign-out still clears the in-memory identity when storage is unavailable.
     }
@@ -173,8 +174,8 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
   const clearLegacyIdentity = useCallback(() => {
     try {
-      localStorage.removeItem(LEGACY_PROFILE_KEY);
-      localStorage.removeItem('quincaillerie.deviceToken');
+      persistentStorage.removeItem(LEGACY_PROFILE_KEY);
+      persistentStorage.removeItem('quincaillerie.deviceToken');
     } finally {
       setLegacyEmployee(null);
     }

@@ -1,5 +1,6 @@
 import { createClient, type Session, type SupabaseClient } from '@supabase/supabase-js';
 import { getHostContext, usesPathRouting } from '@/lib/tenant';
+import { supabaseAuthStorage } from '@/lib/supabaseStorage';
 import type {
   Product, ProductCategory, Sale, StoreInfo, StockMovement,
   RegisterSaleResult, RegisterSaleInput, ArrivalResult, ProductInput, SoldStockTotals,
@@ -87,8 +88,17 @@ const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 export const isSupabaseConfigured = Boolean(url && anonKey);
 
+
 export const supabase: SupabaseClient | null = isSupabaseConfigured
-  ? createClient(url, anonKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false } })
+  ? createClient(url, anonKey, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: false,
+        storage: supabaseAuthStorage,          // ← LA correction critique
+        storageKey: 'quincaillerie.auth',      // ← nom stable, partagé
+      },
+    })
   : null;
 
 export async function authPortal(input: Record<string, string>): Promise<AuthPortalResult> {
