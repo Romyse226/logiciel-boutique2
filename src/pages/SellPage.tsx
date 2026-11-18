@@ -148,7 +148,7 @@ export function SellPage({
           >
             <Plus size={18} />
             <span className="hidden sm:inline">Nouveau produit</span>
-            <span className="sm:hidden">Nouveau</span>
+            <span className="sm:hidden">Nouveau produit</span>
           </button>
         </div>
       </div>
